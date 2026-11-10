@@ -1,0 +1,5 @@
+pyyaml
+yfinance
+pandas
+requests
+httpx

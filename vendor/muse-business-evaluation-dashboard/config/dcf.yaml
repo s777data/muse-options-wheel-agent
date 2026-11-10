@@ -1,0 +1,38 @@
+# DCF assumptions — all in config. WACC is BUILT, not asserted:
+#   cost_of_equity = risk_free + beta (from tickers.yaml) * equity_risk_premium
+#   cost_of_debt_after_tax = pre_tax_cost_of_debt * (1 - tax_rate)
+#   WACC = cost_of_equity * equity_weight + cost_of_debt_after_tax * debt_weight
+#   (weights from market cap and filing debt at run time)
+# Growth is NOT consensus (no paid consensus in v1): the initial FCF growth is
+# the filed 5-year revenue CAGR, clamped to [floor, cap], then faded linearly
+# over the projection — to the fade floor when the clamped CAGR sits above
+# it, otherwise to terminal growth (v5.2). Every number is visible here.
+# The DCF base is TTM owner FCF on a NORMALISED capex (v5.2): the median
+# filed capex intensity of the last 5 fiscal years applied to TTM revenue,
+# capped at actual TTM capex — see SPEC_V5.2.md. The actual-capex base is
+# still computed and reported as the stress floor.
+dcf:
+  risk_free_rate_pct: 4.3
+  risk_free_source: "config input approximating the 10Y UST yield at snapshot; update here"
+  equity_risk_premium_pct: 5.0
+  pre_tax_cost_of_debt_pct: 4.5
+  tax_rate_pct: 15.0
+  # Beta adjustment (v5): "blume" applies the standard Bloomberg
+  # adjustment beta_adj = 0.67 * beta + 0.33 * 1.0 before the CAPM —
+  # raw OLS betas from a ~2-year window are noisy point estimates, and
+  # betas mean-revert toward 1. Uniform for every name; the raw and
+  # adjusted betas are both disclosed in the DCF output. Any other
+  # value (or absence) leaves the raw beta untouched.
+  beta_adjustment: blume
+  projection_years: 5
+  terminal_growth_pct: 3.0
+  growth:
+    method: "filed_revenue_cagr_5y_clamped_then_linear_fade_to_fade_floor_or_terminal"
+    floor_pct: 0.0
+    cap_pct: 25.0
+    # Fade floor (v5.2): when the clamped filed CAGR exceeds this, the
+    # growth path fades only to here over the projection — fading a
+    # mid-cycle (normalised-capex) FCF base to zero growth in five
+    # years double-counts the cycle. At or below it, the path fades to
+    # terminal growth as before.
+    fade_floor_pct: 15.0

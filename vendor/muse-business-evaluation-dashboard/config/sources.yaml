@@ -1,0 +1,119 @@
+# Data sources — endpoints, user agent, and XBRL concept maps live here.
+# SEC fair access requires a declared User-Agent with a contact; the
+# email-style contact is what www.sec.gov requires (data.sec.gov accepts it too).
+sources:
+  user_agent: "Muse Business Evaluation Dashboard admin@example.com"
+  request_delay_seconds: 0.2
+  timeout_seconds: 60
+  edgar_companyfacts_url: "https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+  edgar_submissions_url: "https://data.sec.gov/submissions/CIK{cik}.json"
+  edgar_archive_url: "https://www.sec.gov/Archives/edgar/data/{cik_int}/{accession_nodash}/{primary_document}"
+  price_feeds:
+    - name: yahoo_chart
+      url: "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range=1y&interval=1d"
+    - name: stooq_daily_csv
+      url: "https://stooq.com/q/d/l/?s={symbol_lower}.us&i=d"
+
+# XBRL concept candidates per metric. Every candidate is tried and the
+# FRESHEST series (max latest fiscal year-end) wins — companies change tags
+# over time (e.g. NVDA revenue moved concepts), so first-found can be stale.
+# Flow concepts: the ANNUAL series comes from 10-K / FY rows with an
+# annual duration; the same concepts' 10-Q duration rows are also read to
+# build true trailing-twelve-month values (annual + current-FY YTD -
+# prior-year YTD) for trailing multiples. Balance concepts are read as
+# instant rows, latest filed period end across 10-K and 10-Q. Gross
+# profit falls back to revenue minus cost_of_revenue when a filer
+# (e.g. STX) tags cost but not gross profit.
+concepts:
+  # RevenueFromContractWithCustomerIncludingAssessedTax added 2026-11-09:
+  # CRWD tags revenue ONLY under the Including variant; without it CRWD
+  # extracted no revenue at all and the whole run failed closed.
+  revenue: ["RevenueFromContractWithCustomerExcludingAssessedTax", "SalesRevenueNet", "Revenues", "RevenueFromContractWithCustomerIncludingAssessedTax"]
+  gross_profit: ["GrossProfit"]
+  cost_of_revenue: ["CostOfGoodsAndServicesSold", "CostOfRevenue", "CostOfGoodsSold"]
+  operating_income: ["OperatingIncomeLoss"]
+  net_income: ["NetIncomeLoss"]
+  operating_cash_flow: ["NetCashProvidedByUsedInOperatingActivities"]
+  # Some filers retagged capex: NVDA and QCOM now report it as
+  # PaymentsToAcquireProductiveAssets (their PropertyPlantAndEquipment
+  # series end in 2012 / are absent). Freshest-series selection keeps the
+  # right concept per filer; no peer in the set tags both with live data.
+  capex: ["PaymentsToAcquirePropertyPlantAndEquipment", "PaymentsToAcquireProductiveAssets"]
+  cash: ["CashAndCashEquivalentsAtCarryingValue"]
+  # ShortTermInvestments added in v5: CRDO files its $297.4M of
+  # marketable securities under that tag (Aug 2026), not under the AFS
+  # debt-securities concept, and the engine missed it.
+  investments_current: ["AvailableForSaleSecuritiesDebtSecuritiesCurrent", "ShortTermInvestments"]
+  investments_noncurrent: ["AvailableForSaleSecuritiesDebtSecuritiesNoncurrent"]
+  # Total debt is RESOLVED at the latest balance date (metrics.resolve_total_debt),
+  # never taken from a single concept blindly — filers tag borrowings very
+  # differently (CoreWeave reports only DebtInstrumentCarryingAmount in its
+  # 10-Q balance period; its LongTermDebt pair exists only in older periods).
+  # Resolution priority at each candidate date, newest date first:
+  #   (a) a GRAND TOTAL from total_debt_grand_total (carrying-amount style:
+  #       DebtInstrumentCarryingAmount). A grand total REPLACES all
+  #       components — it is used instead of them, never added (no double
+  #       count);
+  #   (b) FAMILY PAIRS, summed across families (v4): debt is tagged in
+  #       families that COEXIST on one balance sheet — the bank/debt
+  #       family (total_debt_current / total_debt_noncurrent) and the
+  #       notes-payable family (total_notes_current /
+  #       total_notes_noncurrent). For each family present at the date
+  #       with BOTH a current and a noncurrent value (first concept in
+  #       list order per side), take the pair sum; total debt is the sum
+  #       over families. (Applied Digital carries ~$6.4B almost entirely
+  #       as LongTermNotesPayable + NotesPayableCurrent; the bank family
+  #       alone resolved a stray $7.19M concept and understated its debt
+  #       ~1000x before this family existed.)
+  #   (c) a single TOTAL concept from the total_debt list below (first in
+  #       list order with a value at that date).
+  # The total_debt list doubles as the annual series for ROIC history.
+  # LongTermDebt sits last: it excludes the current portion, last resort.
+  total_debt: ["DebtAndCapitalLeaseObligations", "LongTermDebtAndCapitalLeaseObligations", "DebtInstrumentCarryingAmount", "Debt", "Borrowings", "LongTermBorrowings", "LongTermDebt"]
+  total_debt_grand_total: ["DebtInstrumentCarryingAmount"]
+  total_debt_current: ["LongTermDebtCurrent", "DebtCurrent", "LongTermBorrowingsCurrent"]
+  total_debt_noncurrent: ["LongTermDebtNoncurrent", "DebtNoncurrent", "LongTermBorrowingsNoncurrent"]
+  total_notes_current: ["NotesPayableCurrent"]
+  total_notes_noncurrent: ["LongTermNotesPayable", "NotesPayableNoncurrent"]
+  # Finance-lease and operating-lease liabilities are NOT added to total
+  # debt: several total concepts above already embed capital/finance
+  # leases, so adding lease liabilities would double count. The exclusion
+  # is flagged in every run's data_quality.
+  interest_expense: ["InterestExpense", "InterestExpenseDebt", "InterestAndDebtExpense"]
+  # Stock-based compensation (the cash-flow-statement add-back line).
+  # ShareBasedCompensation is attested for every scored filer in the set
+  # (checked 2026-11-07 against companyfacts); AllocatedShareBased-
+  # CompensationExpense is the attested fallback (expense allocated by
+  # function) for a filer that drops the plain tag. SBC is subtracted
+  # from FCF to get owner FCF — see metrics.compute_metrics. GRAB (IFRS)
+  # reports neither and fails closed.
+  share_based_compensation: ["ShareBasedCompensation", "AllocatedShareBasedCompensationExpense"]
+  # Balance-sheet completeness evidence for the v5 verified-zero-debt
+  # rule (metrics/edgar): a filer can only be verified debt-free when a
+  # complete balance sheet is on file.
+  total_liabilities: ["Liabilities"]
+  # Debt cash-flow lines: ANY proceeds/repayment activity in the latest
+  # fiscal year also blocks verified-zero (a borrower repaying is not a
+  # never-borrower for this rule's purposes without balance evidence).
+  debt_proceeds: ["ProceedsFromDebt", "ProceedsFromIssuanceOfDebt", "ProceedsFromLongTermDebt", "ProceedsFromShortTermDebt"]
+  debt_repayments: ["RepaymentsOfDebt", "ProceedsFromRepaymentsOfDebt", "RepaymentsOfLongTermDebt", "RepaymentsOfShortTermDebt"]
+  # Depreciation & amortisation: used only for the display-only TTM
+  # EBITDA behind the ipp_power debt/EBITDA KPI (v5, not scored).
+  depreciation_amortization: ["DepreciationDepletionAndAmortization", "DepreciationAndAmortization", "Depreciation", "DepreciationAmortizationAndAccretionExpense"]
+  # Cash actually spent on share repurchases (v5.3): the execution
+  # cross-check and the by-fiscal-year execution history shown with
+  # the buyback authorization (SPEC_V5.3 §2.1). Spent only — the
+  # authorized / remaining figures are NOT in XBRL; they come from
+  # the periodic filing text (src/evaluator/buybacks.py).
+  share_repurchases: ["PaymentsForRepurchaseOfCommonStock", "PaymentsForRepurchaseOfEquity", "StockRepurchasedAndRetiredDuringPeriodValue"]
+  diluted_shares: ["WeightedAverageNumberOfDilutedSharesOutstanding"]
+  eps_diluted: ["EarningsPerShareDiluted"]
+  rd_expense: ["ResearchAndDevelopmentExpense"]
+  equity: ["StockholdersEquity"]
+
+# Filing full-text concentration extraction: sentence keyword rules.
+filing_search:
+  form: "10-K"
+  single_customer_keywords: ["customer accounted for"]
+  top_ten_keywords: ["top ten customers"]
+  data_center_keywords: ["data center", "end market"]

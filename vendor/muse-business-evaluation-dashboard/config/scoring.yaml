@@ -1,0 +1,183 @@
+# Scoring rubric — ALL weights and anchor points live here, never in code.
+# Each sub-score maps a metric value to 0-10 by piecewise-linear interpolation
+# between [value, score] anchor pairs. Values beyond the ends are clamped.
+# Margin LEVEL sub-scores deliberately use the 5-year MEDIAN (through-cycle)
+# rather than the latest year, so a cyclical peak cannot max the score.
+# This is a generic method applied identically to every ticker, not tuned per name.
+
+business:
+  # Weight rebalance (v2): two leverage sub-scores were added after a run
+  # scored CoreWeave Business 7.11 while its $35.6B debt went unseen —
+  # growth and gross-margin level were over-weighted and the balance sheet
+  # had a single 0.15 voice. The new 0.075 + 0.075 comes out of
+  # revenue_growth (0.15->0.10), revenue_cagr (0.10->0.075),
+  # gross_margin_median (0.20->0.175) and net_cash_to_revenue
+  # (0.15->0.10); all nine weights still sum to exactly 1.0.
+  # (v3 added a tenth — dilution, 0.05 — funded from revenue_growth and
+  # gross_margin_median; see the dilution block. FCF margin and the FCF
+  # figures elsewhere are now SBC-adjusted owner FCF; see sources.yaml.)
+  revenue_growth_latest_pct:
+    weight: 0.075
+    anchors: [[-20, 0], [0, 3], [25, 6], [75, 8.5], [150, 10]]
+  revenue_cagr_5y_pct:
+    weight: 0.075
+    anchors: [[-5, 1], [0, 3], [10, 5.5], [20, 7.5], [30, 9], [40, 10]]
+  gross_margin_median_5y_pct:
+    weight: 0.15
+    anchors: [[0, 0], [15, 2.5], [30, 4.5], [45, 6.5], [60, 8.5], [75, 10]]
+  operating_margin_median_5y_pct:
+    weight: 0.15
+    anchors: [[-10, 0], [0, 3], [10, 5], [20, 7], [35, 9], [50, 10]]
+  fcf_margin_median_5y_pct:
+    weight: 0.15
+    anchors: [[-10, 0], [0, 2.5], [10, 5.5], [20, 8], [30, 10]]
+  net_cash_to_revenue:
+    weight: 0.10
+    anchors: [[-1.0, 0], [-0.25, 2], [0, 4.5], [0.25, 6.5], [0.5, 8], [1.0, 10]]
+  gross_margin_stdev_5y_pts:
+    weight: 0.10
+    anchors: [[0, 10], [5, 8], [10, 6], [20, 3.5], [30, 1.5], [40, 0]]
+  # Dilution (v3): CAGR of diluted weighted-average shares over the
+  # available annual span (up to 5 years). Share count is the one claim
+  # on the business that compounds silently — SBC, converts and equity
+  # raises all land here, net of buybacks. A shrinking count (-3%/yr,
+  # a real buyback) scores 10; flat scores 8.5; +5%/yr halves an owner's
+  # claim in ~14 years and scores 3.5; +10%/yr or worse approaches 0.
+  # Weight 0.05 is funded by gross_margin_median (0.175->0.15) and
+  # revenue_growth (0.10->0.075); all ten weights still sum to 1.0.
+  dilution_share_count_growth_pct:
+    weight: 0.05
+    anchors: [[-3, 10], [0, 8.5], [2, 6], [5, 3.5], [10, 1], [20, 0]]
+  # Leverage: gross debt against trailing revenue. A debt-free filer
+  # scores 10; debt equal to a full year of revenue (1.0x) is mid-pack;
+  # 3x revenue is distress territory for all but regulated balance
+  # sheets, and 5x+ scores zero. Unlike net_cash_to_revenue this cannot
+  # be flattered by a large cash pile raised from the debt itself.
+  leverage_debt_to_revenue_ttm:
+    weight: 0.075
+    anchors: [[0, 10], [0.5, 8], [1.0, 6], [2.0, 4], [3.0, 2], [5.0, 0]]
+  # Interest coverage: TTM operating income over TTM interest expense.
+  # At or below zero (the filer does not earn its interest) it scores 0;
+  # 2x is thin, 4x adequate, 8x strong, 15x fortress. Missing when the
+  # filer reports no interest expense (e.g. no debt) — the weight then
+  # renormalises rather than awarding a free 10.
+  interest_coverage_ttm:
+    weight: 0.075
+    anchors: [[0, 0], [1, 2], [2, 4], [4, 6], [8, 8], [15, 10]]
+
+value:
+  # Weight rebalance (v4): a peer-relative EV/S sub-score (0.15) was added,
+  # funded by trailing_pe (0.20->0.10) and dcf_upside (0.25->0.20); all
+  # seven weights still sum to exactly 1.0. Value stays mostly absolute —
+  # the relative piece only ranks the name inside its own sector group.
+  # Negative-P/E guard (v4, in metrics.add_price_metrics): when trailing
+  # EPS (TTM) <= 0 the trailing_pe metric is MISSING, never scored — a
+  # loss-maker's negative P/E used to clamp to a perfect 10 on the
+  # "lower is cheaper" anchors (CRWV scored 2.00 of its 4.15 Value points
+  # from a -13x P/E). Flagged as negative_trailing_pe_not_scored.
+  trailing_pe:
+    weight: 0.10
+    anchors: [[3, 10], [5, 10], [10, 8], [15, 6.5], [25, 4.5], [40, 2.5], [60, 1]]
+  price_to_sales:
+    weight: 0.15
+    anchors: [[0.5, 10], [1, 9], [2, 7.5], [4, 5.5], [7, 3.5], [10, 2], [15, 0.5]]
+  ev_to_sales:
+    weight: 0.10
+    anchors: [[0.5, 10], [1, 9], [2, 7.5], [4, 5.5], [7, 3.5], [10, 2], [15, 0.5]]
+  fcf_yield_latest_pct:
+    weight: 0.20
+    anchors: [[-2, 0], [0, 1], [2, 3.5], [4, 5.5], [6, 7.5], [8, 9], [12, 10]]
+  dcf_upside_pct:
+    weight: 0.20
+    anchors: [[-50, 0], [-25, 2], [0, 4.5], [25, 6.5], [50, 8], [100, 10]]
+  discount_from_52w_high_pct:
+    weight: 0.05
+    anchors: [[0, 2], [-15, 4], [-30, 6], [-45, 7.5], [-60, 9]]
+  # Forward buyback yield (v5.3, SPEC_V5.3): remaining repurchase
+  # authorization from the latest periodic filing (Item 703 table /
+  # narrative, post-period board actions included) as a % of market
+  # cap. Business already scores the REALISED net share count via
+  # dilution; this leg scores the FORWARD commitment in Value only.
+  # Weight 0.05 is funded from discount_from_52w_high (0.10->0.05),
+  # the noisiest Value leg; all eight weights still sum to 1.0.
+  # Anchors are deliberately ungenerous — authorizations are
+  # permissions, not commitments (MU used $7.84B of a $10B program
+  # over 8 years, $0 in FY25): a 4-5% yield scores ~6, and it takes
+  # a 20%-of-market-cap authorization to max the leg. Overvaluation
+  # cap (in scoring.apply_buyback_overvaluation_cap): when DCF
+  # upside < -50% the sub-score is capped at 4.0. Fail closed: no
+  # verifiable remaining figure -> missing, weights renormalise.
+  forward_buyback_yield_pct:
+    weight: 0.05
+    anchors: [[0, 2], [2, 4], [5, 6.5], [10, 8.5], [20, 10]]
+  # Peer-relative EV/S (v4): the subject's cheapness percentile within
+  # its sector peer group (config/peers.yaml), computed in run.py as
+  # (peers with HIGHER EV/S + 0.5 x ties incl. self) / group size x 100
+  # over group members with a computable EV/S. Linear: the group's
+  # cheapest name approaches 10, its most expensive approaches 0.
+  # Missing (renormalised) when fewer than peers.yaml's
+  # relative_ev_to_sales_min_group members have an EV/S — never scored
+  # off a two-name "group".
+  relative_ev_to_sales_percentile:
+    weight: 0.15
+    anchors: [[0, 0], [100, 10]]
+
+moat:
+  roic_median_5y_pct:
+    weight: 0.20
+    anchors: [[-5, 0], [0, 2.5], [8, 5], [15, 7.5], [25, 10]]
+  gross_margin_median_5y_pct:
+    weight: 0.20
+    anchors: [[0, 0], [15, 2.5], [30, 4.5], [45, 6.5], [60, 8.5], [75, 10]]
+  gross_margin_stdev_5y_pts:
+    weight: 0.15
+    anchors: [[0, 10], [5, 8], [10, 6], [20, 3.5], [30, 1.5], [40, 0]]
+  revenue_percentile_vs_peers:
+    weight: 0.15
+    anchors: [[0, 1], [25, 3.5], [50, 5.5], [75, 7.5], [100, 10]]
+  customer_concentration_score:
+    weight: 0.15
+    anchors: [[0, 0], [10, 10]]
+  capex_intensity_latest_pct:
+    weight: 0.15
+    anchors: [[0, 1], [5, 3], [15, 6], [25, 8], [35, 10]]
+
+# Inflection blend (v5): the 5-year MEDIAN margin is the through-cycle
+# level, but for a filer that has crossed from losses to profits while
+# scaling, the median scores the company it WAS (CRDO: median operating
+# margin -11.5% and owner-FCF margin -11.4% both scored 0 while filed
+# TTM operating margin was +31.7%). For operating_margin_median_5y_pct
+# and fcf_margin_median_5y_pct ONLY, when ALL of these hold —
+#   median < 0, min(latest FY, TTM) > 0,
+#   min(latest FY, TTM) - median >= min_distance_pts,
+#   revenue CAGR over the available span >= min_revenue_cagr_pct,
+#   |latest FY - TTM| <= max_latest_ttm_gap_pts (durability) —
+# the SCORED value is the average of the median and min(latest FY, TTM).
+# Flagged margin_inflection_blend with all values disclosed. A cyclical
+# with a positive median (MU: +26.1%) can never fire — the peak-cycle
+# protection is untouched. Anchors and weights unchanged.
+inflection:
+  min_distance_pts: 15
+  min_revenue_cagr_pct: 20
+  max_latest_ttm_gap_pts: 12
+
+# Rule table for the concentration sub-score (applied in code from filing facts,
+# parameters here): start from base_no_single_customer if no customer >= threshold,
+# subtract per-point penalties for top-10 share above the free allowance.
+concentration_rules:
+  single_customer_threshold_pct: 10
+  base_if_no_single_customer_at_threshold: 7.0
+  base_if_single_customer_present: 4.0
+  single_customer_extra_penalty_per_pct_over_20: 0.1
+  top10_free_allowance_pct: 40
+  top10_penalty_per_pct_over_allowance: 0.04
+  top10_approx_value_when_over_half_pct: 55
+  top10_approx_value_when_one_half_pct: 50
+  score_floor: 0
+  score_ceiling: 10
+
+# Replicability checks for the moat section (thresholds, not code literals).
+moat_checks:
+  entrant_capex_barrier_min_capex_usd: 10000000000
+  margin_fungibility_stdev_pts_over: 15
+  oligopoly_peer_count_max_for_concentrated: 10

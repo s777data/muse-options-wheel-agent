@@ -1,0 +1,666 @@
+# Sector peer groups (v4). Each subject maps to ONE group; the group's
+# members drive (a) the peer-relative EV/S sub-score in Value, (b) the
+# moat revenue_percentile sub-score, and (c) display-only percentile
+# ranks for moat metrics in the run output.
+# Members are US-listed SEC EDGAR filers with US-GAAP XBRL only — the
+# engine reads their filings and a free price feed; a member whose EV/S
+# cannot be computed drops out of the relative ranking (fail closed) and
+# is reported in the run's peer_failures / data_quality.
+# SK hynix and Samsung are MU's closest memory rivals but are EXCLUDED:
+# they do not file with the SEC in a form the free EDGAR XBRL API covers,
+# and no free keyless source covers them. See README "Known limits".
+# GRAB has no group: it is an IFRS 20-F filer and is not scored at all.
+
+# Minimum group size (subject + members with a computable EV/S) for the
+# relative EV/S sub-score to be scored; below this it goes missing.
+relative_ev_to_sales_min_group: 4
+
+# Broad-universe fallback basket (v5.1): when a scored ticker has no
+# curated sector group (or its group is below the minimum size), the
+# relative EV/S percentile is computed against THIS basket of liquid
+# config names instead of going missing. It is always reported under
+# the name "broad_universe_fallback" and disclosed as a broad-universe
+# comparison — never presented as sector peers.
+broad_universe_fallback:
+  - symbol: MU
+    cik: "0000723125"
+    name: "Micron Technology, Inc."
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: NVDA
+    cik: "0001045810"
+    name: "NVIDIA Corporation"
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: META
+    cik: "0001326801"
+    name: "Meta Platforms, Inc."
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: ORCL
+    cik: "0001341439"
+    name: "Oracle Corporation"
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: NFLX
+    cik: "0001065280"
+    name: "Netflix, Inc."
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: UBER
+    cik: "0001543151"
+    name: "Uber Technologies, Inc."
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: TSLA
+    cik: "0001318605"
+    name: "Tesla, Inc."
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: VST
+    cik: "0001692819"
+    name: "Vistra Corp."
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: CRDO
+    cik: "0001807794"
+    name: "Credo Technology Group Holding Ltd"
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: CRWV
+    cik: "0001769628"
+    name: "CoreWeave, Inc."
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: DUOL
+    cik: "0001562088"
+    name: "Duolingo, Inc."
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+  - symbol: NKE
+    cik: "0000320187"
+    name: "NIKE, Inc."
+    rationale: "Broad-universe fallback basket member (liquid config name)"
+
+groups:
+  memory_semis:
+    - symbol: NVDA
+      cik: "0001045810"
+      name: "NVIDIA Corporation"
+      rationale: "Largest AI/data-center silicon supplier; data-center demand comp"
+    - symbol: AMD
+      cik: "0000002488"
+      name: "Advanced Micro Devices, Inc."
+      rationale: "Data-center CPU/GPU supplier; semi valuation comp"
+    - symbol: AVGO
+      cik: "0001730168"
+      name: "Broadcom Inc."
+      rationale: "Diversified semi / AI infrastructure comp"
+    - symbol: INTC
+      cik: "0000050863"
+      name: "Intel Corporation"
+      rationale: "US semi manufacturing scale comp"
+    - symbol: QCOM
+      cik: "0000804328"
+      name: "QUALCOMM Incorporated"
+      rationale: "Large-cap semi profitability comp"
+    - symbol: MRVL
+      cik: "0001835632"
+      name: "Marvell Technology, Inc."
+      rationale: "Data-center silicon comp"
+    - symbol: WDC
+      cik: "0000106040"
+      name: "Western Digital Corporation"
+      rationale: "NAND/storage direct business comp"
+    - symbol: STX
+      cik: "0001137789"
+      name: "Seagate Technology Holdings plc"
+      rationale: "Storage direct business comp"
+  connectivity_semis:
+    - symbol: AVGO
+      cik: "0001730168"
+      name: "Broadcom Inc."
+      rationale: "AI networking / custom silicon comp"
+    - symbol: MRVL
+      cik: "0001835632"
+      name: "Marvell Technology, Inc."
+      rationale: "Data-center connectivity silicon comp"
+    - symbol: NVDA
+      cik: "0001045810"
+      name: "NVIDIA Corporation"
+      rationale: "NVLink / InfiniBand connectivity ecosystem comp"
+    - symbol: AMD
+      cik: "0000002488"
+      name: "Advanced Micro Devices, Inc."
+      rationale: "Data-center interconnect (Infinity Fabric / Pensando) comp"
+    - symbol: ANET
+      cik: "0001596532"
+      name: "Arista Networks, Inc."
+      rationale: "Data-center Ethernet switching comp"
+    - symbol: ALAB
+      cik: "0001736297"
+      name: "Astera Labs, Inc."
+      rationale: "PCIe / CXL connectivity pure-play comp"
+  ai_infra:
+    - symbol: APLD
+      cik: "0001144879"
+      name: "Applied Digital Corp."
+      rationale: "AI data-center builder / GPU cloud comp"
+    - symbol: CORZ
+      cik: "0001839341"
+      name: "Core Scientific, Inc./tx"
+      rationale: "Miner pivoting to AI hosting; large hosting contracts comp"
+    - symbol: WULF
+      cik: "0001083301"
+      name: "TeraWulf Inc."
+      rationale: "Miner pivoting to AI/HPC hosting comp"
+    - symbol: HUT
+      cik: "0001964789"
+      name: "Hut 8 Corp."
+      rationale: "Power / AI infrastructure comp"
+    - symbol: CIFR
+      cik: "0001819989"
+      name: "Cipher Digital Inc."
+      rationale: "Miner pivoting to HPC hosting comp"
+  digital_assets_ai:
+    - symbol: COIN
+      cik: "0001679788"
+      name: "Coinbase Global, Inc."
+      rationale: "Crypto platform scale / valuation comp"
+    - symbol: RIOT
+      cik: "0001167419"
+      name: "Riot Platforms, Inc."
+      rationale: "Bitcoin mining + AI data-center pivot comp"
+    - symbol: MARA
+      cik: "0001507605"
+      name: "MARA Holdings, Inc."
+      rationale: "Bitcoin mining / digital-asset treasury comp"
+    - symbol: CLSK
+      cik: "0000827876"
+      name: "CleanSpark, Inc."
+      rationale: "Bitcoin mining comp"
+    - symbol: HUT
+      cik: "0001964789"
+      name: "Hut 8 Corp."
+      rationale: "Mining + AI infrastructure comp"
+  space_comms:
+    - symbol: RKLB
+      cik: "0001819994"
+      name: "Rocket Lab Corp"
+      rationale: "Space services / satellite platform comp"
+    - symbol: IRDM
+      cik: "0001418819"
+      name: "Iridium Communications Inc."
+      rationale: "LEO satellite communications incumbent comp"
+    - symbol: GSAT
+      cik: "0001366868"
+      name: "Globalstar, Inc."
+      rationale: "LEO satellite / direct-to-device comp"
+    - symbol: VSAT
+      cik: "0000797721"
+      name: "Viasat Inc."
+      rationale: "Satellite communications incumbent comp"
+  ipp_power:
+    - symbol: NRG
+      cik: "0001013871"
+      name: "NRG Energy, Inc."
+      rationale: "Independent power producer / retail power comp"
+    - symbol: CEG
+      cik: "0001868275"
+      name: "Constellation Energy Corp"
+      rationale: "Nuclear fleet / hyperscaler PPA comp"
+    - symbol: TLN
+      cik: "0001622536"
+      name: "Talen Energy Corp"
+      rationale: "Nuclear + merchant power comp"
+    - symbol: AES
+      cik: "0000874761"
+      name: "AES Corp"
+      rationale: "Global IPP / renewables comp"
+  industrial_cooling:
+    - symbol: VRT
+      cik: "0001674101"
+      name: "Vertiv Holdings Co"
+      rationale: "Data-center thermal management direct comp"
+    - symbol: TT
+      cik: "0001466258"
+      name: "Trane Technologies plc"
+      rationale: "HVAC / thermal systems comp"
+    - symbol: CARR
+      cik: "0001783180"
+      name: "Carrier Global Corp"
+      rationale: "HVAC / refrigeration comp"
+    - symbol: JCI
+      cik: "0000833444"
+      name: "Johnson Controls International plc"
+      rationale: "Building systems / cooling comp"
+    - symbol: AAON
+      cik: "0000824142"
+      name: "AAON, Inc."
+      rationale: "Commercial HVAC pure-play comp"
+  enterprise_software:
+    - symbol: MSFT
+      cik: "0000789019"
+      name: "Microsoft Corp"
+      rationale: "Cloud + database platform comp"
+    - symbol: AMZN
+      cik: "0001018724"
+      name: "Amazon.com, Inc."
+      rationale: "AWS cloud / database comp"
+    - symbol: GOOGL
+      cik: "0001652044"
+      name: "Alphabet Inc."
+      rationale: "Google Cloud platform comp"
+    - symbol: CRM
+      cik: "0001108524"
+      name: "Salesforce, Inc."
+      rationale: "Enterprise SaaS comp"
+    - symbol: NOW
+      cik: "0001373715"
+      name: "ServiceNow, Inc."
+      rationale: "Enterprise SaaS comp"
+    - symbol: ADBE
+      cik: "0000796343"
+      name: "Adobe Inc."
+      rationale: "Enterprise software comp"
+  health_plans:
+    - symbol: UNH
+      cik: "0000731766"
+      name: "UnitedHealth Group Inc"
+      rationale: "Managed-care scale comp"
+    - symbol: ELV
+      cik: "0001156039"
+      name: "Elevance Health, Inc."
+      rationale: "Blue Cross health plan comp"
+    - symbol: CNC
+      cik: "0001071739"
+      name: "Centene Corp"
+      rationale: "Government health plans comp"
+    - symbol: MOH
+      cik: "0001179929"
+      name: "Molina Healthcare, Inc."
+      rationale: "Government health plans pure-play comp"
+    - symbol: HUM
+      cik: "0000049071"
+      name: "Humana Inc"
+      rationale: "Medicare Advantage comp"
+  fintech_lending:
+    - symbol: SOFI
+      cik: "0001818874"
+      name: "SoFi Technologies, Inc."
+      rationale: "Digital lending / HELOC comp"
+    - symbol: UPST
+      cik: "0001647639"
+      name: "Upstart Holdings, Inc."
+      rationale: "AI lending platform comp"
+    - symbol: AFRM
+      cik: "0001820953"
+      name: "Affirm Holdings, Inc."
+      rationale: "Consumer credit / BNPL comp"
+    - symbol: COIN
+      cik: "0001679788"
+      name: "Coinbase Global, Inc."
+      rationale: "Fintech platform valuation comp"
+    - symbol: HOOD
+      cik: "0001783879"
+      name: "Robinhood Markets, Inc."
+      rationale: "Fintech platform comp"
+  solar:
+    - symbol: ENPH
+      cik: "0001463101"
+      name: "Enphase Energy, Inc."
+      rationale: "Solar microinverter comp"
+    - symbol: SEDG
+      cik: "0001419612"
+      name: "SolarEdge Technologies, Inc."
+      rationale: "Solar inverter comp"
+    - symbol: FSLR
+      cik: "0001274494"
+      name: "First Solar, Inc."
+      rationale: "Utility-scale solar manufacturing comp"
+    - symbol: RUN
+      cik: "0001469367"
+      name: "Sunrun Inc."
+      rationale: "Residential solar comp"
+    - symbol: NXT
+      cik: "0001852131"
+      name: "Nextpower Inc."
+      rationale: "Solar tracker direct comp"
+    - symbol: ARRY
+      cik: "0001820721"
+      name: "Array Technologies, Inc."
+      rationale: "Solar tracker direct comp"
+  drones_defense:
+    - symbol: AVAV
+      cik: "0001368622"
+      name: "AeroVironment Inc"
+      rationale: "Unmanned aerial systems incumbent comp"
+    - symbol: KTOS
+      cik: "0001069258"
+      name: "Kratos Defense & Security Solutions, Inc."
+      rationale: "Unmanned systems / defense comp"
+    - symbol: RCAT
+      cik: "0000748268"
+      name: "Red Cat Holdings, Inc."
+      rationale: "Small drone pure-play comp"
+    - symbol: UAVS
+      cik: "0000008504"
+      name: "AgEagle Aerial Systems Inc."
+      rationale: "Drone / UAS pure-play comp"
+  athletic_consumer:
+    - symbol: DECK
+      cik: "0000910521"
+      name: "Deckers Outdoor Corp"
+      rationale: "Footwear brand comp"
+    - symbol: LULU
+      cik: "0001397187"
+      name: "lululemon athletica inc."
+      rationale: "Premium athletic apparel comp"
+    - symbol: UA
+      cik: "0001336917"
+      name: "Under Armour, Inc."
+      rationale: "Athletic apparel direct comp"
+    - symbol: CROX
+      cik: "0001334036"
+      name: "Crocs, Inc."
+      rationale: "Footwear brand comp"
+  # Added 2026-11-07: the 12 comparison peer groups, merged in from the
+  # score-compare working copy (same EDGAR-filers-only rule as above).
+  streaming_media:
+    - symbol: DIS
+      cik: "0001744489"
+      name: "Walt Disney Co"
+      rationale: "Streaming / studio scale comp"
+    - symbol: FOX
+      cik: "0001754301"
+      name: "Fox Corp"
+      rationale: "Media / broadcast + streaming comp"
+    - symbol: ROKU
+      cik: "0001428439"
+      name: "ROKU, INC"
+      rationale: "Connected-TV platform comp"
+    - symbol: CMCSA
+      cik: "0001166691"
+      name: "COMCAST CORP"
+      rationale: "Media + broadband distribution comp"
+    - symbol: AMZN
+      cik: "0001018724"
+      name: "AMAZON COM INC"
+      rationale: "Prime Video / mega-cap media comp"
+  mobility_delivery:
+    - symbol: LYFT
+      cik: "0001759509"
+      name: "Lyft, Inc."
+      rationale: "Rideshare direct comp"
+    - symbol: DASH
+      cik: "0001792789"
+      name: "DoorDash, Inc."
+      rationale: "Delivery marketplace direct comp"
+    - symbol: ABNB
+      cik: "0001559720"
+      name: "Airbnb, Inc."
+      rationale: "Consumer marketplace platform comp"
+    - symbol: BKNG
+      cik: "0001075531"
+      name: "Booking Holdings Inc."
+      rationale: "Travel marketplace platform comp"
+    - symbol: CART
+      cik: "0001579091"
+      name: "Maplebear Inc."
+      rationale: "Grocery delivery marketplace comp"
+  restaurants:
+    - symbol: CMG
+      cik: "0001058090"
+      name: "CHIPOTLE MEXICAN GRILL INC"
+      rationale: "Fast-casual leader comp"
+    - symbol: SHAK
+      cik: "0001620533"
+      name: "Shake Shack Inc."
+      rationale: "Fast-casual growth comp"
+    - symbol: WING
+      cik: "0001636222"
+      name: "Wingstop Inc."
+      rationale: "Franchised restaurant growth comp"
+    - symbol: SG
+      cik: "0001477815"
+      name: "Sweetgreen, Inc."
+      rationale: "Fast-casual salad concept comp"
+    - symbol: TXRH
+      cik: "0001289460"
+      name: "Texas Roadhouse, Inc."
+      rationale: "Casual dining operator comp"
+  medtech_devices:
+    - symbol: ISRG
+      cik: "0001035267"
+      name: "INTUITIVE SURGICAL INC"
+      rationale: "Medtech platform / razor-blade comp"
+    - symbol: BSX
+      cik: "0000885725"
+      name: "BOSTON SCIENTIFIC CORP"
+      rationale: "Diversified medtech comp"
+    - symbol: MDT
+      cik: "0001613103"
+      name: "Medtronic plc"
+      rationale: "Diversified medtech scale comp"
+    - symbol: EW
+      cik: "0001099800"
+      name: "Edwards Lifesciences Corp"
+      rationale: "Structural-heart devices comp"
+    - symbol: INSP
+      cik: "0001609550"
+      name: "Inspire Medical Systems, Inc."
+      rationale: "Implantable device growth comp"
+  beauty_consumer:
+    - symbol: EL
+      cik: "0001001250"
+      name: "ESTEE LAUDER COMPANIES INC"
+      rationale: "Prestige beauty comp"
+    - symbol: COTY
+      cik: "0001024305"
+      name: "COTY INC."
+      rationale: "Beauty manufacturer comp"
+    - symbol: ULTA
+      cik: "0001403568"
+      name: "Ulta Beauty, Inc."
+      rationale: "Beauty retail comp"
+    - symbol: PG
+      cik: "0000080424"
+      name: "PROCTER & GAMBLE Co"
+      rationale: "Consumer staples quality comp"
+    - symbol: CL
+      cik: "0000021665"
+      name: "COLGATE PALMOLIVE CO"
+      rationale: "Consumer staples quality comp"
+  insurtech_carriers:
+    - symbol: PGR
+      cik: "0000080661"
+      name: "PROGRESSIVE CORP/OH/"
+      rationale: "Best-in-class auto carrier comp"
+    - symbol: ALL
+      cik: "0000899051"
+      name: "ALLSTATE CORP"
+      rationale: "Large personal-lines carrier comp"
+    - symbol: LMND
+      cik: "0001691421"
+      name: "Lemonade, Inc."
+      rationale: "Insurtech direct comp"
+    - symbol: OSCR
+      cik: "0001568651"
+      name: "Oscar Health, Inc."
+      rationale: "Health insurtech comp (also a subject)"
+    - symbol: HIPO
+      cik: "0001828105"
+      name: "Hippo Holdings Inc."
+      rationale: "Insurtech comp"
+  mega_internet:
+    - symbol: GOOGL
+      cik: "0001652044"
+      name: "Alphabet Inc."
+      rationale: "Digital ads / platform comp"
+    - symbol: MSFT
+      cik: "0000789019"
+      name: "MICROSOFT CORP"
+      rationale: "Mega-cap platform comp"
+    - symbol: AMZN
+      cik: "0001018724"
+      name: "AMAZON COM INC"
+      rationale: "Mega-cap platform / ads comp"
+    - symbol: SNAP
+      cik: "0001564408"
+      name: "Snap Inc"
+      rationale: "Social media direct comp"
+    - symbol: PINS
+      cik: "0001506293"
+      name: "PINTEREST, INC."
+      rationale: "Social / discovery platform comp"
+  ipp_power_ceg:
+    - symbol: VST
+      cik: "0001692819"
+      name: "Vistra Corp."
+      rationale: "IPP / nuclear comp (also a subject)"
+    - symbol: NRG
+      cik: "0001013871"
+      name: "NRG ENERGY, INC."
+      rationale: "IPP / retail power comp"
+    - symbol: TLN
+      cik: "0001622536"
+      name: "Talen Energy Corp"
+      rationale: "Nuclear + merchant power comp"
+    - symbol: AES
+      cik: "0000874761"
+      name: "AES CORP"
+      rationale: "Global IPP comp"
+    - symbol: NEE
+      cik: "0000753308"
+      name: "NEXTERA ENERGY INC"
+      rationale: "Regulated + renewables utility scale comp"
+  edtech_apps:
+    - symbol: COUR
+      cik: "0001651562"
+      name: "Coursera, Inc."
+      rationale: "Online education platform comp"
+    - symbol: LRN
+      cik: "0001157408"
+      name: "Stride, Inc."
+      rationale: "Online education operator comp"
+    - symbol: APP
+      cik: "0001751008"
+      name: "AppLovin Corp"
+      rationale: "App monetisation platform comp"
+    - symbol: MTCH
+      cik: "0000891103"
+      name: "Match Group, Inc."
+      rationale: "Consumer subscription app comp"
+    - symbol: CHGG
+      cik: "0001364954"
+      name: "CHEGG, INC"
+      rationale: "Education services comp"
+  autos_ev:
+    - symbol: GM
+      cik: "0001467858"
+      name: "General Motors Co"
+      rationale: "Legacy auto scale comp"
+    - symbol: F
+      cik: "0000037996"
+      name: "FORD MOTOR CO"
+      rationale: "Legacy auto scale comp"
+    - symbol: RIVN
+      cik: "0001874178"
+      name: "Rivian Automotive, Inc. / DE"
+      rationale: "EV pure-play comp"
+    - symbol: LCID
+      cik: "0001811210"
+      name: "Lucid Group, Inc."
+      rationale: "EV pure-play comp"
+    - symbol: ALV
+      cik: "0001034670"
+      name: "AUTOLIV INC"
+      rationale: "Auto safety supplier comp"
+  space_launch:
+    - symbol: RKLB
+      cik: "0001819994"
+      name: "Rocket Lab Corp"
+      rationale: "Space services pure-play comp"
+    - symbol: ASTS
+      cik: "0001780312"
+      name: "AST SpaceMobile, Inc."
+      rationale: "LEO satellite comp (also scored elsewhere)"
+    - symbol: IRDM
+      cik: "0001418819"
+      name: "Iridium Communications Inc."
+      rationale: "LEO satellite comms comp"
+    - symbol: LMT
+      cik: "0000936468"
+      name: "LOCKHEED MARTIN CORP"
+      rationale: "Defence / space prime comp"
+    - symbol: NOC
+      cik: "0001133421"
+      name: "NORTHROP GRUMMAN CORP /DE/"
+      rationale: "Defence / space prime comp"
+  clean_power_equipment:
+    - symbol: PLUG
+      cik: "0001093691"
+      name: "PLUG POWER INC"
+      rationale: "Hydrogen fuel-cell direct comp"
+    - symbol: FCEL
+      cik: "0000886128"
+      name: "FUELCELL ENERGY INC"
+      rationale: "Fuel-cell direct comp"
+    - symbol: ENPH
+      cik: "0001463101"
+      name: "Enphase Energy, Inc."
+      rationale: "Solar equipment comp"
+    - symbol: NXT
+      cik: "0001852131"
+      name: "Nextpower Inc."
+      rationale: "Solar tracker comp"
+    - symbol: APD
+      cik: "0000002969"
+      name: "Air Products & Chemicals, Inc."
+      rationale: "Industrial gases / energy comp"
+
+  ai_data_software:
+    - symbol: SNOW
+      cik: "0001640147"
+      name: "Snowflake Inc."
+      rationale: "Cloud data platform direct comp"
+    - symbol: DDOG
+      cik: "0001561550"
+      name: "Datadog, Inc."
+      rationale: "Observability / data platform comp"
+    - symbol: MDB
+      cik: "0001441816"
+      name: "MongoDB, Inc."
+      rationale: "Database platform comp"
+    - symbol: NOW
+      cik: "0001373715"
+      name: "ServiceNow, Inc."
+      rationale: "Enterprise workflow software comp"
+    - symbol: CRM
+      cik: "0001108524"
+      name: "Salesforce, Inc."
+      rationale: "Enterprise software scale comp"
+
+subjects:
+  MU: memory_semis
+  CRDO: connectivity_semis
+  CRWV: ai_infra
+  GLXY: digital_assets_ai
+  ASTS: space_comms
+  VST: ipp_power
+  MOD: industrial_cooling
+  ORCL: enterprise_software
+  ALHC: health_plans
+  FIGR: fintech_lending
+  SHLS: solar
+  ONDS: drones_defense
+  NKE: athletic_consumer
+  # Added 2026-11-07 with the comparison-ticker merge (OSCR reuses the
+  # existing health_plans group; the other 12 map to the new groups above).
+  NFLX: streaming_media
+  UBER: mobility_delivery
+  CAVA: restaurants
+  TMDX: medtech_devices
+  ELF: beauty_consumer
+  ROOT: insurtech_carriers
+  META: mega_internet
+  CEG: ipp_power_ceg
+  DUOL: edtech_apps
+  TSLA: autos_ev
+  SPCX: space_launch
+  BE: clean_power_equipment
+  OSCR: health_plans
+  # Added 2026-11-07: PLTR curated into its own AI/data-software group.
+  PLTR: ai_data_software
+  # GRAB: no group — IFRS filer, not scored.
+
+excluded_note: "SK hynix (000660.KS) and Samsung Electronics (005930.KS) excluded - not SEC EDGAR XBRL filers and no free keyless source covers them. Nebius (NBIS) and IREN, the closest listed neocloud comps for CRWV, are IFRS 20-F filers and are likewise excluded from ai_infra."
