@@ -128,3 +128,11 @@ here. Nothing else differs intentionally.
   (string) feeds float P&L arithmetic — same class as D-13.
   Proposed 3-line patch in `scripts/profit_taking.py` (unwrap
   `q.get("quote", q)`; float-coerce quantity), pending approval.
+- **D-15 (Transport allowlist alignment, 2026-11-09, BIG SANDY
+  approved):** the local Robinhood client's ALLOWED_TOOLS gained 5
+  non-order tools (create_scan, run_scan, get_equity_tax_lots,
+  get_trade_approvals, review_option_order). The shim mirrors this:
+  the two reads are in READ_TOOLS; create_scan/run_scan/
+  review_option_order sit in NON_ORDER_ACTION_TOOLS (scanner runs and
+  order previews only — no placement surface). All order write tools
+  remain in WRITE_TOOLS and raise WriteToolDisabled (re-verified).

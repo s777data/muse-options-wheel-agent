@@ -10,12 +10,16 @@ call surfaces on top of the local read-only Robinhood client:
 
 and returns the parsed ``structuredContent`` payload.
 
-READ-ONLY: only the 15 tools in the local client's ALLOWED_TOOLS may be
-called. Any write tool (place/cancel/review/exercise/...) raises
-``WriteToolDisabled``; any other non-allowlisted tool raises
-``ToolNotAllowlisted`` (server may offer it; the local client blocks it —
-see INVENTORY.md parity gaps). Nothing here ever invents data: a failed
-call raises ``RobinhoodTransportError``.
+READ-ONLY CORE: the 15 original read tools in the local client's
+ALLOWED_TOOLS. On 2026-11-09 BIG SANDY approved extending the client
+allowlist with 5 non-order tools for this agent: ``get_equity_tax_lots``
+and ``get_trade_approvals`` (reads), plus ``create_scan``, ``run_scan``
+and ``review_option_order`` (they create scanner runs and order
+*previews* — they cannot place, cancel, or modify any order; see
+NON_ORDER_ACTION_TOOLS). Any order write tool
+(place/cancel/exercise/...) still raises ``WriteToolDisabled``; any
+other non-allowlisted tool raises ``ToolNotAllowlisted``. Nothing here
+ever invents data: a failed call raises ``RobinhoodTransportError``.
 """
 from __future__ import annotations
 
@@ -33,14 +37,23 @@ READ_TOOLS = {
     "get_option_chains", "get_option_instruments", "get_option_quotes",
     "get_equity_technical_indicators", "get_earnings_calendar",
     "get_earnings_results",
+    # Added 2026-11-09 with BIG SANDY's approval (pure reads):
+    "get_equity_tax_lots", "get_trade_approvals",
+}
+
+# Approved non-order action tools (2026-11-09, BIG SANDY): scanner runs
+# and order *review* previews. None of these can place, cancel, replace,
+# or exercise an order; order writes stay in WRITE_TOOLS below.
+NON_ORDER_ACTION_TOOLS = {
+    "create_scan", "run_scan", "review_option_order",
 }
 
 WRITE_TOOLS = {
     "place_option_order", "place_equity_order", "place_crypto_order",
     "cancel_option_order", "cancel_equity_order", "cancel_crypto_order",
-    "cancel_option_exercise", "exercise_option", "review_option_order",
+    "cancel_option_exercise", "exercise_option",
     "review_equity_order", "preview_crypto_order", "decline_trade_approval",
-    "create_scan", "run_scan", "update_scan_config", "update_scan_filters",
+    "update_scan_config", "update_scan_filters",
     "preview_scan", "create_watchlist", "add_to_watchlist",
     "add_option_to_watchlist", "remove_from_watchlist",
     "remove_option_from_watchlist", "follow_watchlist", "unfollow_watchlist",
@@ -69,7 +82,7 @@ def call_robinhood_tool(name: str, arguments: dict | None = None,
     if name in WRITE_TOOLS:
         raise WriteToolDisabled(
             f"write tool {name!r} is hard-disabled in muse-options-wheel-agent")
-    if name not in READ_TOOLS:
+    if name not in READ_TOOLS and name not in NON_ORDER_ACTION_TOOLS:
         raise ToolNotAllowlisted(
             f"tool {name!r} is not in the local Robinhood client's "
             f"read allowlist (see INVENTORY.md parity gaps)")

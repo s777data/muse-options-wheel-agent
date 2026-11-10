@@ -208,3 +208,31 @@
   `RuntimeError: Single scanner query failed after 3 attempts`,
   workflow FAILED (fail-closed working). Unblocking Phase 4A is the
   client-allowlist decision (create_scan/run_scan), not a code fix.
+
+## Session 5 (2026-11-09) — allowlist extended (approved), deepest run yet
+
+- BIG SANDY approved extending the Robinhood client allowlist with 5
+  non-order tools. `client.py` ALLOWED_TOOLS += create_scan, run_scan,
+  get_equity_tax_lots, get_trade_approvals, review_option_order
+  (backup: client.py.bak-2026-11-09). Shim aligned (D-15): the two
+  reads joined READ_TOOLS; create_scan/run_scan/review_option_order
+  moved to a new NON_ORDER_ACTION_TOOLS set — they create scanner
+  runs / order previews only. Order tools verified still
+  WriteToolDisabled (place/cancel/exercise/decline). Live smoke:
+  get_trade_approvals (0 pending) and get_equity_tax_lots both work.
+- Dry run `20261110T022548Z-765de2a3` (~3 min): Phase 1 PASS,
+  Phase 2 PASS, **Phase 4A scanner WORKED** (16 rows under the $2.06
+  cap), Phase 4B revenue gate passed 3 (KEEL, EOSE, GERN; one
+  yfinance timeout warning on CIG, gate completed), Phase 4C
+  technicals passed all 3, **Phase 5 scored live in-pipeline**:
+  GERN Final-Code 37.5 (Biz 20.5 / Val 50.9 / GAV-Code 58.0),
+  EOSE 33.8 (16.7 / 36.2 / 65.6), KEEL unscored
+  (ttm_revenue_growth_missing → fail-closed, excluded) — exactly the
+  designed behavior on a real cohort.
+- Run FAILED in Phase 6 on the quote-freshness gate:
+  `stale underlying quote for GERN: 19727.0s` (~5.5 h — the run was
+  at 18:25 PT, after the 13:00 PT close). This is the PRD safety
+  gate working, not a bug; nothing patched. A full end-to-end PASS
+  requires a market-hours run. Remaining phases (6 chain
+  qualification, 7 ranking, 8 covered calls) are untested live for
+  this reason only; Phase 8's tax-lots dependency is now unblocked.
