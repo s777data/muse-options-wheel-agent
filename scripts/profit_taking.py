@@ -121,7 +121,8 @@ def run_profit_taking_check() -> dict:
     
     quote_map = {}
     for q in quotes_data["data"]["results"]:
-        quote_map[q["instrument_id"]] = q
+        qq = q.get("quote", q)
+        quote_map[qq["instrument_id"]] = qq
     
     signals = []
     for pos in short_positions:
@@ -131,7 +132,7 @@ def run_profit_taking_check() -> dict:
             continue
         
         # Get position details
-        quantity = pos.get("quantity", 0)
+        quantity = float(pos.get("quantity", 0) or 0)
         avg_price = float(pos.get("average_price", 0))  # premium received per contract
         current_bid = float(quote.get("bid_price", 0) or 0)
         current_ask = float(quote.get("ask_price", 0) or 0)

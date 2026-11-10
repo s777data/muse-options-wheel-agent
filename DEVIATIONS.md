@@ -120,7 +120,7 @@ here. Nothing else differs intentionally.
   used at all — the session-1 scaffold (D-01..D-04) drives the copied
   phase bodies, and phase `telegram_message`s are delivered through
   the scaffold's deduped `send_telegram()`.
-- **OBSERVED-2, not patched (session 3 dry run):** live
+- **D-14 (Phase 2 live-shape patch, applied 2026-11-09 with BIG SANDY's approval; was OBSERVED-2 in session 3):** live
   `get_option_quotes` results nest the quote under a `quote` key
   (`{"quote": {instrument_id, bid_price, ...}, "close": {...}}`);
   the source builds `quote_map[q["instrument_id"]]` from flat

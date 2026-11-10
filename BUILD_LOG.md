@@ -186,3 +186,25 @@
   `q.get("quote", q)` when building quote_map, use the unwrapped
   quote for bid/ask, and `quantity = float(pos.get("quantity", 0) or 0)`.
   Recorded in DEVIATIONS.md as OBSERVED-2 pending approval.
+
+## Session 4 (2026-11-09) — D-14 applied, dry run re-run
+
+- D-14 applied with BIG SANDY's approval (3 lines in
+  `scripts/profit_taking.py`): quote results unwrapped via
+  `q.get("quote", q)` when building the quote map, and
+  `quantity = float(pos.get("quantity", 0) or 0)` at the P&L read.
+  DEVIATIONS.md OBSERVED-2 converted to D-14.
+- Dry run result appended below after the run.
+- Dry run `20261110T022223Z-3dc41770`: **Phase 1 PASS, Phase 2 PASS**
+  (first fully green Phase 2: both FIGR short positions on …6392
+  evaluated and signal rows produced; note the source's Phase 2
+  output is placeholder-grade by its own comments — strike shows 0
+  because live positions carry no strike_price, and the signed
+  average_price makes its P&L arithmetic non-decision-grade; the
+  phase executes, the numbers are the source's, flagged here).
+  Run then FAILED in Phase 4A as predicted: scanner query
+  (price < $2.06) → `create_scan` hard-disabled in the transport
+  shim (not in the Robinhood client allowlist), 3 bounded retries,
+  `RuntimeError: Single scanner query failed after 3 attempts`,
+  workflow FAILED (fail-closed working). Unblocking Phase 4A is the
+  client-allowlist decision (create_scan/run_scan), not a code fix.
