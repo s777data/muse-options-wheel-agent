@@ -264,3 +264,20 @@
   source code untouched.
 
 - D-17 decision (2026-11-09): BIG SANDY declined the fix — GENB is to be ignored. Known accepted behavior: a cohort containing a no-10-K filer (engine raises -> result null) will stop the run at the Phase 5 merge until/unless D-17 is revived.
+
+## Session 7 (2026-11-09) — D-18 engine fixes + D-19 adapter fallback
+
+- BIG SANDY approved "engine fixes plus the flagged yfinance
+  fallback". Built in the dashboard working copy, synced to vendor,
+  independently re-verified by Muse in the main thread (controls
+  harness + spot tickers URGN/TNGX/KEEL/GENB).
+- Note: the pre-build diagnosis was wrong in three places; the build
+  re-derived causes from companyfacts: URGN = basic-shares-only
+  filer (Fix C-2), TNGX = filed revenue of 0 suppressing all price
+  legs (Fix C-1), PGEN = bridge failure with clean FY annuals
+  (Fix B fy_annual rung). Fix A was narrowed mid-build after a
+  BRK.B baseline diff exposed cross-tag splicing risk.
+- Final cohort state: 63 scored / 4 unscored (GENB, AADX, QNT,
+  SECZ — no 10-K / shell, by design). New scores include LGN 67.7,
+  FIGR 59.4, GLXY 57.9, EQPT 54.5, URGN 48.2, PGEN 36.6, APLD 32.6,
+  KEEL 30.2, TNGX 27.8, ZBIO 24.1, BMNR 21.6 (Final-Code).

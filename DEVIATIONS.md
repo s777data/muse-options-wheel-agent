@@ -150,3 +150,26 @@ here. Nothing else differs intentionally.
   a result (e.g. GENB: no 10-K on EDGAR). Today the source's merge
   step hard-fails the whole run on a null result; with the envelope,
   such tickers are excluded per-ticker like KEEL/BRK.B.
+- **D-18 (Engine update, 2026-11-09, BIG SANDY approved):** vendored
+  dashboard engine advanced past ac8deaf with three generic fixes,
+  built in the dashboard working copy and synced here (diff-verified;
+  suite 107 -> 123, all passing; MU/NVDA/V/CRWD/BRK.B controls
+  byte-identical). Fix A: annual revenue may gap-fill individual
+  periods from a SUPERSEDED candidate tag only (never splices
+  coexisting live tags — a BRK.B-shaped regression test locks this).
+  Fix B: GAV-Code growth fallback chain — ttm_bridge ->
+  quarterly_sum -> fy_annual — with `growth_source` provenance on
+  every score. Fix C-1: a filed revenue of exactly 0 no longer
+  suppresses price-only value legs (TNGX). Fix C-2: basic-shares
+  fallback when no diluted series exists and the latest annual net
+  income is negative (ASC 260; URGN). Result: 11 of the 15 previously
+  unscored cohort names now score on EDGAR data alone; GENB/AADX/
+  QNT/SECZ remain fail-closed (no 10-K / shell), as designed.
+- **D-19 (Adapter yfinance GAV fallback, 2026-11-09, BIG SANDY
+  approved):** when a ticker has Business+Value but GAV-Code is None
+  solely for ttm_revenue_growth_missing (after the D-18 EDGAR chain),
+  valuation_scorer may fill the growth band from yfinance annual
+  revenue, stamped `gav_code.source = yfinance_annual_fallback` and
+  `result.fallback = gav_growth_yfinance_annual`; rows carry
+  `gav_code_source` and `fallback`. Implemented and unit-verified;
+  did not fire on the current cohort (no stragglers remained).

@@ -316,6 +316,74 @@ def annual_series(facts, candidates, metric):
     return best
 
 
+def _merged_revenue_series(facts, candidates):
+    """Merge the revenue series across candidate concepts — safely.
+
+    The candidates are alternative XBRL tags for the same revenue, and
+    filers migrate between them — sometimes mid-stream, so the freshest
+    ANNUAL rows live under one tag while the interim period rows live
+    under another (APLD: FY2026 annual under Revenues, the 10-Q history
+    under RevenueFromContractWithCustomerExcludingAssessedTax). Picking
+    a single concept by freshest annual end (the old behaviour) then
+    starves the TTM bridge of the other tag's period rows.
+
+    But the tags are not always substitutes: Berkshire reports BOTH
+    Revenues (total revenues, incl. investment gains) and contract
+    revenue, live, in the same filings, at different values. Mixing
+    those per-period would splice two different revenue definitions
+    into one series. The merge therefore keeps a strict shape:
+
+      * The PRIMARY concept is the long-standing single-concept pick:
+        freshest annual period end, config order breaking ties. Its
+        annual series is returned EXACTLY as the old code returned it
+        — the annual series drives through-cycle medians, CAGR and
+        cross-metric alignment for every filer, and splicing annual
+        history across tags corrupts that alignment (a superseded
+        tag's ancient years can align with another metric's stale
+        series and manufacture a "current" median out of decade-old
+        data — seen live on BRK, whose operating-income tag exists
+        only in 2012-2017 filings).
+      * A secondary concept may fill PERIOD-ROW gaps (the (start,
+        end) keys the primary lacks) only when it is a SUPERSEDED
+        tag — its own annual series ends strictly before the
+        primary's, or it has no annual rows at all. A concept whose
+        annual series is as fresh as the primary's is a coexisting
+        live tag and contributes nothing. Period rows feed only the
+        TTM bridge and the quarterly-sum growth fallback, both
+        anchored at the recent end, so gap-filling there cannot
+        resurrect stale history.
+
+    Periods are selected, never summed: even for a superseded tag the
+    candidates are substitutes, not components. A single-tag filer
+    gets exactly its own series back."""
+    per_concept = []
+    for idx, concept in enumerate(candidates):
+        rows = _unit_rows(facts, concept, "revenue")
+        if not rows:
+            continue
+        annual = _annual_from_rows(rows, "revenue")
+        periods = _period_rows(rows)
+        per_concept.append({
+            "idx": idx, "annual": annual, "periods": periods,
+            "latest_annual": annual[-1]["end"] if annual else "",
+            "latest_period": periods[-1]["end"] if periods else ""})
+    if not per_concept:
+        return [], []
+    primary = max(per_concept,
+                  key=lambda c: (c["latest_annual"], -c["idx"]))
+    periods_by_key = {(r["start"], r["end"]): r for r in primary["periods"]}
+    for entry in per_concept:
+        if entry is primary:
+            continue
+        if entry["latest_annual"] and \
+                entry["latest_annual"] >= primary["latest_annual"]:
+            continue  # coexisting live tag — different scope, hands off
+        for row in entry["periods"]:
+            periods_by_key.setdefault((row["start"], row["end"]), row)
+    periods = [periods_by_key[k] for k in sorted(periods_by_key)]
+    return primary["annual"], periods
+
+
 def get_company_metrics(sources_cfg, cik):
     src = sources_cfg["sources"]
     url = src["edgar_companyfacts_url"].format(cik=cik)
@@ -324,6 +392,15 @@ def get_company_metrics(sources_cfg, cik):
     series, periods, balance_latest = {}, {}, {}
     for metric, candidates in sources_cfg["concepts"].items():
         if metric in DEBT_COMPONENT_KEYS:
+            continue
+        if metric == "revenue":
+            # Revenue is built by MERGING every candidate concept (see
+            # _merged_revenue_series): tag migration can split the
+            # annual history and the interim period rows across tags,
+            # and a single-concept pick starves the TTM bridge.
+            merged_annual, merged_periods = _merged_revenue_series(facts, candidates)
+            series[metric] = merged_annual
+            periods[metric] = merged_periods
             continue
         # Choose the concept with the freshest annual series (or, for a
         # metric with no annual rows at all, the first with any rows).
@@ -370,7 +447,60 @@ def get_company_metrics(sources_cfg, cik):
     series["_periods"] = periods
     series["_balance_latest"] = balance_latest
     apply_class_share_fallback(series, periods, sources_cfg, cik)
+    apply_basic_shares_fallback(series, periods, facts, sources_cfg)
     return facts.get("entityName"), series
+
+
+BASIC_SHARES_CONCEPT = "WeightedAverageNumberOfSharesOutstandingBasic"
+
+
+def apply_basic_shares_fallback(series, periods, facts, sources_cfg):
+    """Basic-shares fallback for a missing diluted share count.
+
+    Some filers tag ONLY WeightedAverageNumberOfSharesOutstandingBasic
+    in companyfacts — no diluted concept at all (URGN: basic filed
+    through the latest 10-K, diluted entirely absent) — so every
+    market-cap / per-share metric fails closed despite a fully filed
+    share count, and the class-share fallback finds nothing because
+    the filing carries no diluted share facts to validate either.
+
+    Under ASC 260 a loss-maker's diluted denominator EQUALS its basic
+    denominator (potential shares are antidilutive and excluded), so
+    for a loss-making filer the filed basic series IS the diluted
+    series. The fallback therefore fires only when ALL hold:
+      (a) no diluted series exists (the class-share fallback has
+          already had its chance — a validated filing-text count is
+          the better source and always wins);
+      (b) a basic annual series exists in companyfacts;
+      (c) the filer's latest annual net income is negative.
+    Anything else stays missing — fail closed, exactly as today.
+    Provenance is recorded on series["_basic_shares_fallback"]."""
+    provenance = {"applied": False}
+    if series.get("diluted_shares"):
+        series["_basic_shares_fallback"] = provenance
+        return provenance
+    rows = _unit_rows(facts, BASIC_SHARES_CONCEPT, "diluted_shares")
+    annual = _annual_from_rows(rows, "diluted_shares")
+    if not annual:
+        provenance["reason"] = "no_basic_shares_series"
+        series["_basic_shares_fallback"] = provenance
+        return provenance
+    ni = annual_series(facts, sources_cfg["concepts"].get("net_income", []),
+                       "net_income")
+    if not ni:
+        provenance["reason"] = "net_income_series_missing"
+    elif ni[-1]["value"] >= 0:
+        provenance["reason"] = "latest_annual_net_income_not_negative"
+    else:
+        series["diluted_shares"] = annual
+        periods["diluted_shares"] = _period_rows(rows)
+        provenance = {"applied": True,
+                      "concept": BASIC_SHARES_CONCEPT,
+                      "latest_annual_net_income": ni[-1]["value"],
+                      "latest_annual_end": ni[-1]["end"],
+                      "basis": "asc_260_antidilution_loss_maker_diluted_equals_basic"}
+    series["_basic_shares_fallback"] = provenance
+    return provenance
 
 
 def apply_class_share_fallback(series, periods, sources_cfg, cik):

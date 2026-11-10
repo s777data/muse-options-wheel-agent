@@ -201,6 +201,50 @@ def resolve_total_debt(debt_instants, fallback_latest=None):
     return {"value": None, "as_of": None, "method": "not_determinable", "components": {}}
 
 
+def _quarterly_sum_ttm_growth(period_rows):
+    """TTM growth from standalone-quarter durations: the sum of the
+    latest 4 single quarters vs the sum of the 4 before them.
+
+    A fallback for filers whose YTD bridge cannot be built (post-IPO
+    names without a prior-year YTD pair, fiscal-year changes) but who
+    file clean standalone quarters. Single-quarter rows only (60-115
+    day durations — YTD and annual frames are excluded by the window);
+    when two rows share an end, the one closest to a calendar quarter
+    wins, then the most recently filed. Fail-closed: fewer than 8
+    quarters, a gap between consecutive quarter ends outside 60-130
+    days, a non-positive prior window, or a negative current window
+    all return None."""
+    by_end = {}
+    for r in period_rows or []:
+        dur = (_day(r["end"]) - _day(r["start"])).days
+        if not (60 <= dur <= 115):
+            continue
+        cur = by_end.get(r["end"])
+        if cur is None:
+            by_end[r["end"]] = r
+            continue
+        cur_dur = (_day(cur["end"]) - _day(cur["start"])).days
+        if abs(dur - 91) < abs(cur_dur - 91) or (
+                abs(dur - 91) == abs(cur_dur - 91)
+                and (r.get("filed") or "") > (cur.get("filed") or "")):
+            by_end[r["end"]] = r
+    ends = sorted(by_end, reverse=True)
+    if len(ends) < 8:
+        return None
+    chosen = ends[:8]
+    for newer, older in zip(chosen, chosen[1:]):
+        if not (60 <= (_day(newer) - _day(older)).days <= 130):
+            return None
+    rows = [by_end[e] for e in chosen]
+    current = sum(r["value"] for r in rows[:4])
+    prior = sum(r["value"] for r in rows[4:])
+    if prior <= 0 or current < 0:
+        return None
+    return {"growth_pct": (current / prior - 1) * 100,
+            "current_value": current, "prior_value": prior,
+            "prior_end": rows[4]["end"]}
+
+
 def _latest_period_value(period_rows):
     """Most recent period's value: max end, then shortest duration (the
     standalone quarter, not the YTD cumulative), then latest filed."""
@@ -255,23 +299,37 @@ def compute_metrics(series, tax_rate_pct, inflection_cfg=None):
     out["ttm_details"] = ttm_details
     out["ttm_end"] = (ttm_details.get("revenue") or {}).get("ttm_end")
 
-    # Prior-year TTM revenue and TTM growth (GAV-Code input): rebuild the
-    # TTM as it stood at the same point of the previous fiscal year, using
-    # the same bridge anchored on the previous annual period with the
-    # interim search capped at the matching date (+20d tolerance, the
-    # same slack the bridge itself allows). Fail-closed: any missing
-    # piece, a non-positive prior TTM, or TTM ends that are not roughly
-    # a year apart (300-430 days) leaves the growth missing.
+    # Prior-year TTM revenue and TTM growth (GAV-Code input), resolved
+    # by a fail-closed fallback chain — each step fires only when the
+    # previous one produced nothing, and the winning source is recorded
+    # in revenue_ttm_growth_source:
+    #   1. "ttm_bridge"    — rebuild the TTM as it stood at the same
+    #      point of the previous fiscal year, using the same bridge
+    #      anchored on the previous annual period with the interim
+    #      search capped at the matching date (+20d tolerance, the
+    #      same slack the bridge itself allows). A non-positive prior
+    #      TTM, or TTM ends that are not roughly a year apart
+    #      (300-430 days), fails the step.
+    #   2. "quarterly_sum" — sum of the latest 4 standalone quarters
+    #      vs the 4 before them (see _quarterly_sum_ttm_growth), for
+    #      filers whose YTD pairs cannot be built (post-IPO histories,
+    #      fiscal-year changes).
+    #   3. "fy_annual"     — latest fiscal-year revenue vs the prior
+    #      fiscal year. (When the current TTM basis is annual-only this
+    #      is exactly the figure the bridge path produced before the
+    #      chain existed: TTM == latest annual there.)
     out["revenue_ttm_prior"] = None
     out["revenue_ttm_prior_end"] = None
     out["revenue_ttm_growth_pct"] = None
+    out["revenue_ttm_growth_source"] = None
     rev_ttm = out.get("revenue_ttm")
+    growth = None  # (pct, prior_value, prior_end, source)
     if rev_ttm is not None and len(rev) >= 2:
         prev_annual = rev[-2]
         rev_basis = (ttm_details.get("revenue") or {}).get("basis")
         prior_val = prior_end = None
         if rev_basis == "annual_only_no_interim_filings_since_fy_end":
-            prior_val, prior_end = prev_annual["value"], prev_annual["end"]
+            pass  # step 3 reproduces this figure exactly (TTM == annual)
         elif out.get("ttm_end"):
             p_start = _annual_start(periods.get("revenue"), prev_annual["end"])
             if p_start is not None:
@@ -287,9 +345,21 @@ def compute_metrics(series, tax_rate_pct, inflection_cfg=None):
                     if 300 <= gap <= 430:
                         prior_val, prior_end = t_prior["value"], t_prior["ttm_end"]
         if prior_val:
-            out["revenue_ttm_prior"] = prior_val
-            out["revenue_ttm_prior_end"] = prior_end
-            out["revenue_ttm_growth_pct"] = (rev_ttm / prior_val - 1) * 100
+            growth = ((rev_ttm / prior_val - 1) * 100, prior_val, prior_end,
+                      "ttm_bridge")
+    if growth is None:
+        q = _quarterly_sum_ttm_growth(periods.get("revenue", []))
+        if q is not None:
+            growth = (q["growth_pct"], q["prior_value"], q["prior_end"],
+                      "quarterly_sum")
+    if growth is None and len(rev) >= 2 and rev[-2]["value"]:
+        growth = ((rev[-1]["value"] / rev[-2]["value"] - 1) * 100,
+                  rev[-2]["value"], rev[-2]["end"], "fy_annual")
+    if growth is not None:
+        out["revenue_ttm_growth_pct"] = growth[0]
+        out["revenue_ttm_prior"] = growth[1]
+        out["revenue_ttm_prior_end"] = growth[2]
+        out["revenue_ttm_growth_source"] = growth[3]
 
     # TTM FCF is SBC-adjusted owner FCF (v3): operating cash flow adds
     # stock comp back, so raw OCF - capex treats equity pay as free.
@@ -567,23 +637,34 @@ def add_price_metrics(metrics, price):
     """Trailing multiples on a TTM basis: revenue / EPS / FCF come from
     the TTM build when available (falling back to the latest annual, with
     the basis recorded), and market cap uses the most recent period's
-    diluted share count."""
+    diluted share count.
+
+    Market cap and the EPS / FCF-yield / 52-week legs need only shares
+    and price. Only the revenue-ratio legs (P/S, EV/S) need a revenue
+    base — and a filer that FILES zero TTM revenue (a wound-down
+    collaboration, a pre-revenue period) has data, not missing data:
+    zero revenue must not suppress the revenue-independent legs (the
+    old truthiness gate did exactly that — TNGX lost even its
+    discount-from-52-week-high, a pure price leg). P/S and EV/S stay
+    missing on a zero base: a multiple of a zero denominator is not a
+    number, and missing is the honest state."""
     shares = metrics.get("diluted_shares_latest_period") or metrics.get("diluted_shares_latest")
+    if not shares:
+        return metrics
+    metrics["shares_used_for_market_cap"] = shares
+    mktcap = price["last_close"] * shares
+    metrics["market_cap"] = mktcap
     rev = metrics.get("revenue_ttm")
     basis = "ttm"
     if rev is None:
         rev = metrics.get("revenue_latest")
         basis = "annual_fallback"
-    if not shares or not rev:
-        return metrics
-    metrics["shares_used_for_market_cap"] = shares
-    metrics["revenue_used_for_multiples"] = rev
-    metrics["multiples_basis"] = basis
-    mktcap = price["last_close"] * shares
-    metrics["market_cap"] = mktcap
-    metrics["price_to_sales"] = mktcap / rev
-    net_cash = metrics.get("net_cash_latest") or 0
-    metrics["ev_to_sales"] = (mktcap - net_cash) / rev
+    if rev:
+        metrics["revenue_used_for_multiples"] = rev
+        metrics["multiples_basis"] = basis
+        metrics["price_to_sales"] = mktcap / rev
+        net_cash = metrics.get("net_cash_latest") or 0
+        metrics["ev_to_sales"] = (mktcap - net_cash) / rev
     eps = metrics.get("eps_diluted_ttm")
     eps_derived = False
     # Derived-EPS fallback: some filers never tag the standard EPS

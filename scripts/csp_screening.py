@@ -1192,6 +1192,9 @@ def build_phase5_valuation_rows(
             ),
             "gav_code_score": gav_code.get("score"),
             "gav_code_label": gav_code.get("label"),
+            "gav_code_source": gav_code.get("source")
+                               or gav_code.get("growth_source"),
+            "fallback": result.get("fallback"),
             "final_code": composite_score,
             "score": composite_score,
             "classification": result.get("classification"),

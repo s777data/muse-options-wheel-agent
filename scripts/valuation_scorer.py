@@ -26,7 +26,11 @@ FINAL-CODE replaces the placeholder final_score as the composite `score`.
 Fail-closed: any exception, missing Business/Value, or a gav_code
 missing_reason produces a terminal `insufficient_data` record with the
 reason preserved, score None — never fabricated, never retried to force
-a score. `fresh_retry` is accepted for signature compatibility but NEVER
+a score. ONE approved exception (BIG SANDY, 2026-11-09): when Business
+and Value both scored but GAV-Code failed ONLY for missing TTM revenue
+growth, a flagged fallback derives the growth band from yfinance
+annual revenue (see _gav_yfinance_fallback) and marks the result
+prominently (result["fallback"], gav_code.source). `fresh_retry` is accepted for signature compatibility but NEVER
 triggers a --no-cache/--refresh retry (PRD §11 gap 5): the dashboard
 engine's own 12h EDGAR disk cache governs freshness.
 
@@ -138,6 +142,61 @@ def _confidence(business: dict, value: dict) -> tuple[str, float, bool]:
     return "low", coverage, False
 
 
+def _yfinance_annual_revenue_growth(engine_symbol: str):
+    """Annual revenue growth from yfinance (two most recent annual
+    Total Revenue values), as a fraction — or None when unavailable.
+    This is the adapter's ONLY non-EDGAR input, used solely by the
+    flagged GAV-Code fallback below; the engine itself stays
+    EDGAR-only."""
+    try:
+        import math
+
+        import yfinance as yf
+        fin = yf.Ticker(engine_symbol).financials
+        if fin is None or "Total Revenue" not in fin.index:
+            return None
+        vals = []
+        for v in fin.loc["Total Revenue"].tolist():
+            if v is None:
+                continue
+            fv = float(v)
+            if math.isfinite(fv):
+                vals.append(fv)
+        if len(vals) < 2 or vals[1] <= 0:
+            return None
+        return vals[0] / vals[1] - 1
+    except Exception:
+        return None
+
+
+def _gav_yfinance_fallback(engine_symbol: str, value_total: float):
+    """Flagged GAV-Code fallback (approved by BIG SANDY 2026-11-09):
+    when the engine produced Business and Value but no GAV-Code
+    because TTM revenue growth is missing on EDGAR, derive the growth
+    band from yfinance annual revenue with the engine's OWN band table
+    and label set (imported from the vendored scoring module, so the
+    bands can never drift apart). The substitute is disclosed in the
+    result three ways: gav_code.source / gav_code.growth_source =
+    "yfinance_annual_fallback" and result.fallback =
+    "gav_growth_yfinance_annual". Returns the gav block or None."""
+    growth = _yfinance_annual_revenue_growth(engine_symbol)
+    if growth is None:
+        return None
+    from src.evaluator.scoring import gav_label, growth_band_score
+    band = growth_band_score(growth * 100)
+    if band is None:
+        return None
+    score = round(0.5 * band + 0.5 * value_total * 10, 1)
+    return {"score": score, "label": gav_label(score),
+            "growth_score": band,
+            "ttm_revenue_growth_pct": round(growth * 100, 4),
+            "growth_source": "yfinance_annual_fallback",
+            "source": "yfinance_annual_fallback",
+            "value_score": value_total,
+            "weights": {"growth": 0.5, "value": 0.5},
+            "missing_reason": None}
+
+
 def _build_result(ticker: str, engine_symbol: str, raw: dict,
                   injected: bool) -> dict:
     scores = raw.get("scores") or {}
@@ -183,6 +242,13 @@ def _build_result(ticker: str, engine_symbol: str, raw: dict,
         return insufficient("business_score_missing")
     if v_total is None:
         return insufficient("value_score_missing")
+    fallback = None
+    if gav.get("score") is None \
+            and gav.get("missing_reason") == "ttm_revenue_growth_missing":
+        fb_gav = _gav_yfinance_fallback(engine_symbol, v_total)
+        if fb_gav is not None:
+            gav = fb_gav
+            fallback = "gav_growth_yfinance_annual"
     if gav.get("score") is None:
         return insufficient(gav.get("missing_reason")
                             or "gav_code_missing")
@@ -198,6 +264,7 @@ def _build_result(ticker: str, engine_symbol: str, raw: dict,
         "methodology_version": METHODOLOGY_VERSION,
         "run_id": run_id, "ticker": ticker, "engine_symbol": engine_symbol,
         "status": "ok", "final_score": final_code,
+        "fallback": fallback,
         "grade": _grade(final_code),
         "classification": gav.get("label"),
         "confidence": confidence, "regime": "ordinary",

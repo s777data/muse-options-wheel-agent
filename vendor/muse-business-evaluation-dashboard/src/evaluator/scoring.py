@@ -159,10 +159,13 @@ def gav_label(score):
     return None
 
 
-def gav_code(ttm_revenue_growth_pct, value_total):
+def gav_code(ttm_revenue_growth_pct, value_total, growth_source=None):
     """Compose GAV-Code from the TTM revenue growth percentage and the
     engine Value total (0-10). Returns the block stored in run output:
-    score (0-100, 1dp) + label + components + missing_reason."""
+    score (0-100, 1dp) + label + components + missing_reason.
+    growth_source names the metrics fallback chain step that produced
+    the growth figure ("ttm_bridge" | "quarterly_sum" | "fy_annual");
+    disclosed, never scored."""
     growth_score = growth_band_score(ttm_revenue_growth_pct)
     missing = None
     if growth_score is None:
@@ -176,6 +179,7 @@ def gav_code(ttm_revenue_growth_pct, value_total):
     return {"score": score, "label": gav_label(score),
             "growth_score": growth_score,
             "ttm_revenue_growth_pct": ttm_revenue_growth_pct,
+            "growth_source": growth_source,
             "value_score": value_total,
             "weights": {"growth": 0.5, "value": 0.5},
             "missing_reason": missing}
