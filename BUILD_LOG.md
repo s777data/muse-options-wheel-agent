@@ -147,3 +147,20 @@
   local client allowlist) inside run_csp_screening. Note the source
   Phase 1 does not call get_trade_approvals at all (PRD lists it; the
   code doesn't), so that anticipated stop does not occur.
+
+## Push (2026-11-09 session 2) — SUCCESS
+
+- Target re-confirmed empty immediately before the push (list_commits
+  -> 409). No prior sync record existed (session 1 never advanced one).
+- Snapshot push: **58 files, 591,450 bytes** (excludes .venv, outputs/,
+  __pycache__, and the vendor engine's runtime output/cache), branch
+  main. Provider initialized the repo (initial commit 003dd6f3) and
+  the snapshot landed as head **98239034936679a783e9313184fbf2992ebd85fc**.
+- Read-back verification: list_commits head == 98239034…; six key
+  files fetched back and byte-compared to local — csp_screening.py
+  (105,576 bytes; contains the source's qualify_options_hardened /
+  MIN_CSP_SHORT_POP and the D-05 Final-Code composite),
+  valuation_scorer.py, README.md, order_lifecycle.py (guard present),
+  covered_calls.py (D-07 helpers present), profit_taking.py — **all
+  identical**. Sync record saved at
+  ~/workspace/muse-options-wheel-agent.muse-github-snapshot-sync.json.
