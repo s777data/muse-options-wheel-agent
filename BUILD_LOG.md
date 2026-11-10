@@ -281,3 +281,21 @@
   SECZ — no 10-K / shell, by design). New scores include LGN 67.7,
   FIGR 59.4, GLXY 57.9, EQPT 54.5, URGN 48.2, PGEN 36.6, APLD 32.6,
   KEEL 30.2, TNGX 27.8, ZBIO 24.1, BMNR 21.6 (Final-Code).
+
+## Session 8 (2026-11-09) — Phase 6+7 rehearsal on closing quotes
+
+- At BIG SANDY's instruction ("run phase 6, just use last closed
+  values"), a harness (outputs/run_phase6_rehearsal.py, no repo code
+  changed) fed the pipeline's own qualify_options_hardened +
+  build_phase7_ranking the $40 cohort's Phase 5 rows (63 scored;
+  4 null-result names excluded — Phase 6 consumes scored rows only),
+  with two in-process-only relaxations: quote max age raised
+  (closing quotes ~30,890s old) and buying power premised at $4,000
+  to match the $40 cap. Production gates untouched.
+- Result: primary cohort (HRMY, BRBR, LGN, UNIT, NRIX) strict
+  window: 0 qualified. Secondary strict: 2 qualified — HIMS
+  Dec 18 '26 $22P (bid $2.08, net ROC 10.44%, POP 0.638, OI 2,311)
+  ranked #1, SMCI Dec 18 '26 $28P (bid $2.42, net ROC 9.46%,
+  POP 0.634, OI 6,103) ranked #2; INOD/ADEA/NUVB no contract passed.
+  First end-to-end Phase 6/7 completion. Phase 8 (covered calls)
+  and a true market-hours full run remain for the Nov 10 cron.
