@@ -144,7 +144,7 @@ here. Nothing else differs intentionally.
   and `scan_cap_override_usd`. Collateral capacity checks still use
   real buying power and order placement remains hard-disabled, so
   the override widens analysis scope only. Unset = original behavior.
-- **D-17 (PROPOSED, not applied):** adapter exception path should
+- **D-17 (DECLINED by BIG SANDY 2026-11-09 — 'ignore GENB'; not applied):** adapter exception path should
   emit the structured insufficient_data envelope instead of
   `result: null` when the dashboard engine raises before producing
   a result (e.g. GENB: no 10-K on EDGAR). Today the source's merge

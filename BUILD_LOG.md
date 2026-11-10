@@ -262,3 +262,5 @@
   engine error) instead of result: null — per-ticker fail-closed,
   consistent with every other unscored path. Adapter file only;
   source code untouched.
+
+- D-17 decision (2026-11-09): BIG SANDY declined the fix — GENB is to be ignored. Known accepted behavior: a cohort containing a no-10-K filer (engine raises -> result null) will stop the run at the Phase 5 merge until/unless D-17 is revived.
