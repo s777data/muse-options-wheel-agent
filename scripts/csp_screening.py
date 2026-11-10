@@ -215,6 +215,15 @@ def run_account_preflight() -> Tuple[dict, dict]:
 
     # Preserve the exact broker-derived cap for the scanner's strict '<' test.
     MAX_UNDERLYING_PRICE_USD = buying_power / STANDARD_OPTION_CONTRACT_SHARES
+    # D-16 (dry-run scan-cap override, requested by BIG SANDY 2026-11-09):
+    # when WHEEL_SCAN_PRICE_CAP_USD is set, the scanner cap uses it so a
+    # dry run can rehearse a funded account (e.g. 40 = $4,000 buying
+    # power). Analysis scope only: collateral capacity checks keep the
+    # real buying power, and order placement stays hard-disabled.
+    broker_cap_usd = MAX_UNDERLYING_PRICE_USD
+    _cap_override = os.environ.get("WHEEL_SCAN_PRICE_CAP_USD")
+    if _cap_override:
+        MAX_UNDERLYING_PRICE_USD = float(_cap_override)
     MIN_MARKET_CAP_USD = (
         LOW_CASH_MIN_MARKET_CAP_USD
         if MAX_UNDERLYING_PRICE_USD <= LOW_CASH_MAX_UNDERLYING_PRICE_USD
@@ -239,6 +248,9 @@ def run_account_preflight() -> Tuple[dict, dict]:
         "account_state": account.get("state"),
         "unleveraged_buying_power_usd": buying_power,
         "max_underlying_price_usd": MAX_UNDERLYING_PRICE_USD,
+        "broker_derived_cap_usd": broker_cap_usd,
+        "scan_cap_override_usd": (
+            float(_cap_override) if _cap_override else None),
         "min_market_cap_usd": MIN_MARKET_CAP_USD,
         "source": "Robinhood MCP get_accounts + get_portfolio",
     }

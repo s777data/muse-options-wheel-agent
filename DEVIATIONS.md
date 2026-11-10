@@ -136,3 +136,17 @@ here. Nothing else differs intentionally.
   review_option_order sit in NON_ORDER_ACTION_TOOLS (scanner runs and
   order previews only — no placement surface). All order write tools
   remain in WRITE_TOOLS and raise WriteToolDisabled (re-verified).
+- **D-16 (Dry-run scan-cap override, 2026-11-09, BIG SANDY
+  requested):** `run_account_preflight` honors env
+  `WHEEL_SCAN_PRICE_CAP_USD`: when set, the scanner price cap uses it
+  instead of buying_power/100, rehearsing a funded account in dry
+  runs. The Phase 1 artifact records both `broker_derived_cap_usd`
+  and `scan_cap_override_usd`. Collateral capacity checks still use
+  real buying power and order placement remains hard-disabled, so
+  the override widens analysis scope only. Unset = original behavior.
+- **D-17 (PROPOSED, not applied):** adapter exception path should
+  emit the structured insufficient_data envelope instead of
+  `result: null` when the dashboard engine raises before producing
+  a result (e.g. GENB: no 10-K on EDGAR). Today the source's merge
+  step hard-fails the whole run on a null result; with the envelope,
+  such tickers are excluded per-ticker like KEEL/BRK.B.

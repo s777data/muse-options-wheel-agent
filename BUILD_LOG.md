@@ -236,3 +236,29 @@
   requires a market-hours run. Remaining phases (6 chain
   qualification, 7 ranking, 8 covered calls) are untested live for
   this reason only; Phase 8's tax-lots dependency is now unblocked.
+
+## Session 6 (2026-11-09) — $40 scan-cap dry run (D-16) + new Phase 5 failure found
+
+- D-16 applied at BIG SANDY's request: env-gated dry-run scan-cap
+  override `WHEEL_SCAN_PRICE_CAP_USD` in run_account_preflight
+  (default behavior unchanged; collateral checks keep real buying
+  power; orders stay disabled).
+- Dry run `20261110T034515Z-beb17c40` with cap $40, total 17m47s.
+  Phase timings: P1 ~5s, P2 ~5s, 4A ~7s (182 rows; min-mcap tier
+  stepped to $1B per the source's >$25 rule), 4B 3m29s (182 -> 68;
+  top rejection: annual YoY <= 15%, 78 names), 4C 5m53s (68 -> 67),
+  Phase 5 ~8m (all 67 evaluated sequentially).
+- Run FAILED at the Phase 5 merge: GENB (Generate Biomedicines,
+  recent IPO, CIK 0002100782, no 10-K on EDGAR) makes the dashboard
+  engine raise `No 10-K found`; the D-05 adapter records
+  `result: null` for engine exceptions, and the source's
+  build_phase5_valuation_rows treats a null result as fatal.
+  Contrast KEEL/BRK.B: engine returns a structured insufficient_data
+  envelope -> ticker excluded, run continues. Reproduced standalone
+  via tests/run_phase5_controls.py GENB.
+- Proposed fix D-17 (NOT applied, awaiting approval): in the
+  adapter's exception path, emit the standard structured
+  insufficient_data envelope (scores null, failure_reason = the
+  engine error) instead of result: null — per-ticker fail-closed,
+  consistent with every other unscored path. Adapter file only;
+  source code untouched.
