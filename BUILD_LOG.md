@@ -164,3 +164,25 @@
   covered_calls.py (D-07 helpers present), profit_taking.py — **all
   identical**. Sync record saved at
   ~/workspace/muse-options-wheel-agent.muse-github-snapshot-sync.json.
+
+## Session 3 (2026-11-09) — D-13 applied, dry run re-run
+
+- D-13 applied with BIG SANDY's approval: `scripts/profit_taking.py`
+  short-position filter now `float(pos.get("quantity", 0) or 0) > 0`
+  (one line; DEVIATIONS.md updated from OBSERVED to D-13).
+- Dry run `20261110T021954Z-8b21b60e`: Phase 1 PASS again (agentic
+  …6392, BP $206.25). Phase 2 got PAST the quantity filter — the fix
+  works — and found the account's 2 open FIGR short option positions.
+  It then FAILED with `KeyError: 'instrument_id'` at the quote-map
+  line. Root cause diagnosed against the live MCP (read-only calls):
+  `get_option_quotes` returns `results[]` items shaped
+  `{"quote": {instrument_id, bid_price, ask_price, ...}, "close": {...}}`
+  — the quote is nested — while the source expects flat quote objects.
+  A second latent instance of the D-13 bug sits downstream of it:
+  `quantity = pos.get("quantity", 0)` (string) is used in float
+  arithmetic for unrealized P&L.
+- NOT patched (outside the approved one-line scope). Proposed
+  Phase 2 live-shape patch, 3 lines in profit_taking.py: unwrap
+  `q.get("quote", q)` when building quote_map, use the unwrapped
+  quote for bid/ask, and `quantity = float(pos.get("quantity", 0) or 0)`.
+  Recorded in DEVIATIONS.md as OBSERVED-2 pending approval.

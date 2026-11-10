@@ -107,7 +107,7 @@ def run_profit_taking_check() -> dict:
     
     short_positions = []
     for pos in pos_data["data"]["results"]:
-        if pos.get("type") == "short" and pos.get("quantity", 0) > 0:
+        if pos.get("type") == "short" and float(pos.get("quantity", 0) or 0) > 0:
             short_positions.append(pos)
     
     if not short_positions:

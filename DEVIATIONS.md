@@ -110,12 +110,21 @@ here. Nothing else differs intentionally.
   import, because httpx 0.28's URLPattern parser rejects them when the
   module-level SEC client is built (this sandbox exports them; the same
   hosts are present unbracketed, so bypass semantics are unchanged).
-- **OBSERVED, not patched (session 2 dry run):** the live Robinhood
-  MCP returns option-position `quantity` as a string; the source
-  profit-taking filter `pos.get("quantity", 0) > 0` raises TypeError
-  against it. Left verbatim (outside the approved deviation list);
-  the one-line fix is `float(pos.get("quantity", 0) or 0) > 0`.
+- **D-13 (Phase 2 live-data fix, applied 2026-11-09 with BIG SANDY's
+  approval):** the live Robinhood MCP returns option-position
+  `quantity` as a string; the source profit-taking filter
+  `pos.get("quantity", 0) > 0` raised TypeError against it (session 2
+  dry run). One line changed in `scripts/profit_taking.py`:
+  `float(pos.get("quantity", 0) or 0) > 0`. Nothing else touched.
   Also observed: the source's `full_wheel.py` orchestrator was not
   used at all — the session-1 scaffold (D-01..D-04) drives the copied
   phase bodies, and phase `telegram_message`s are delivered through
   the scaffold's deduped `send_telegram()`.
+- **OBSERVED-2, not patched (session 3 dry run):** live
+  `get_option_quotes` results nest the quote under a `quote` key
+  (`{"quote": {instrument_id, bid_price, ...}, "close": {...}}`);
+  the source builds `quote_map[q["instrument_id"]]` from flat
+  objects → KeyError. Downstream, `quantity = pos.get("quantity", 0)`
+  (string) feeds float P&L arithmetic — same class as D-13.
+  Proposed 3-line patch in `scripts/profit_taking.py` (unwrap
+  `q.get("quote", q)`; float-coerce quantity), pending approval.
