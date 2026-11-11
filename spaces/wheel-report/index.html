@@ -1,0 +1,756 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="color-scheme" content="light dark" />
+    <link rel="icon" href="data:," />
+    <title>Wheel Phase 5 Heatmap</title>
+    <style>
+      :root {
+        --bg: #f4f5f2;
+        --panel: #ffffff;
+        --ink: #1a1d1a;
+        --ink-2: #4c554d;
+        --ink-3: #7c877d;
+        --line: #dde1da;
+        --line-strong: #c3cbc0;
+        --accent: #14532d;
+        --accent-soft: #e7f0e8;
+        --heat-text: #17251b;
+        --unscored-bg: #edeef0;
+        --chip-bg: #eef1ec;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #101311;
+          --panel: #171b18;
+          --ink: #e8ece8;
+          --ink-2: #a9b4aa;
+          --ink-3: #77837a;
+          --line: #2a302b;
+          --line-strong: #3a423b;
+          --accent: #7fc98f;
+          --accent-soft: #1d2b20;
+          --heat-text: #eef4ee;
+          --unscored-bg: #1c1f1d;
+          --chip-bg: #20261f;
+        }
+      }
+      * { box-sizing: border-box; }
+      html { -webkit-text-size-adjust: 100%; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: ui-sans-system, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-size: 15px;
+        line-height: 1.45;
+      }
+      .wrap { max-width: 1280px; margin: 0 auto; padding: 28px 20px 56px; }
+
+      header h1 {
+        font-size: 26px;
+        line-height: 1.2;
+        margin: 0 0 6px;
+        letter-spacing: -0.01em;
+        font-weight: 750;
+      }
+      header h1 .thin { font-weight: 450; color: var(--ink-2); }
+      .sub { color: var(--ink-2); margin: 0 0 4px; font-size: 14.5px; }
+      .meta-line { color: var(--ink-3); font-size: 12.5px; margin: 0; font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+
+      .method {
+        margin: 18px 0 0;
+        padding: 12px 14px;
+        background: var(--accent-soft);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        font-size: 13.5px;
+        color: var(--ink-2);
+      }
+      .method strong { color: var(--ink); }
+      .method .formula {
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        font-size: 13px;
+        color: var(--ink);
+      }
+
+      .stats {
+        display: flex; flex-wrap: wrap; gap: 8px;
+        margin: 16px 0 20px;
+      }
+      .stat {
+        background: var(--chip-bg);
+        border: 1px solid var(--line);
+        border-radius: 999px;
+        padding: 5px 12px;
+        font-size: 13px;
+        color: var(--ink-2);
+        white-space: nowrap;
+      }
+      .stat b { color: var(--ink); font-variant-numeric: tabular-nums; }
+
+      .toolbar {
+        display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+        margin-bottom: 10px;
+      }
+      .toolbar input[type="search"] {
+        flex: 1 1 180px; max-width: 300px;
+        padding: 8px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--ink);
+        font-size: 14px;
+      }
+      .toolbar .hint { font-size: 12.5px; color: var(--ink-3); flex: 1 1 100%; }
+      .run-control {
+        display: flex; align-items: center; gap: 8px;
+        flex: 1 1 320px; max-width: 560px; min-width: 0;
+      }
+      .run-control label {
+        font-size: 12px; font-weight: 700; letter-spacing: 0.05em;
+        text-transform: uppercase; color: var(--ink-2); white-space: nowrap;
+      }
+      .run-control select {
+        flex: 1 1 auto; min-width: 0; width: 100%;
+        padding: 8px 32px 8px 12px;
+        border: 1px solid var(--line-strong);
+        border-radius: 8px;
+        background: var(--panel);
+        color: var(--ink);
+        font-size: 14px; font-weight: 600;
+        appearance: auto;
+      }
+      .run-note {
+        margin-top: 10px; padding-top: 10px;
+        border-top: 1px solid var(--line);
+        font-size: 13px;
+      }
+      .run-note strong { color: var(--ink); }
+      .cap-line { margin-top: 4px; }
+
+      .table-shell {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        overflow: hidden;
+      }
+      table {
+        width: 100%;
+        border-collapse: separate;
+        border-spacing: 0;
+        font-variant-numeric: tabular-nums;
+      }
+      thead th {
+        position: sticky; top: 0; z-index: 2;
+        background: var(--panel);
+        border-bottom: 2px solid var(--line-strong);
+        text-align: right;
+        font-size: 12px;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--ink-2);
+        padding: 10px 10px;
+        cursor: pointer;
+        user-select: none;
+        white-space: nowrap;
+      }
+      thead th:first-child { text-align: left; }
+      thead th:hover { color: var(--ink); }
+      thead th .arrow { font-size: 10px; margin-left: 3px; color: var(--accent); }
+      thead th.final-col { color: var(--ink); }
+      tbody td {
+        padding: 7px 10px;
+        border-bottom: 1px solid var(--line);
+        text-align: right;
+        font-size: 14px;
+        white-space: nowrap;
+      }
+      tbody tr:last-child td { border-bottom: none; }
+      td.ticker-cell { text-align: left; }
+      .ticker {
+        font-weight: 700;
+        font-size: 14.5px;
+        letter-spacing: 0.01em;
+      }
+      .reason {
+        display: block;
+        font-size: 11.5px;
+        color: var(--ink-3);
+        font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+        white-space: normal;
+      }
+      .tmeta { display: none; }
+      td.score {
+        font-weight: 650;
+        color: var(--heat-text);
+        min-width: 74px;
+      }
+      td.score .band {
+        display: block;
+        font-size: 10.5px;
+        font-weight: 550;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        opacity: 0.75;
+      }
+      td.final-score { font-weight: 800; font-size: 15px; }
+      td.growth { font-weight: 550; }
+      .gsrc {
+        display: block;
+        font-size: 10px;
+        font-weight: 550;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: var(--ink-3);
+        margin-top: 1px;
+      }
+      .gsrc.fallback { color: #b45309; font-weight: 700; }
+      @media (prefers-color-scheme: dark) {
+        .gsrc.fallback { color: #f0b35e; }
+      }
+      td.missing { color: var(--ink-3); font-weight: 400; }
+      thead th.col-sector, thead th.col-subsector { text-align: left; }
+      td.col-sector, td.col-subsector {
+        text-align: left;
+        white-space: normal;
+        overflow-wrap: break-word;
+        line-height: 1.3;
+        font-size: 13.5px;
+        color: var(--ink);
+        min-width: 110px;
+      }
+      td.col-subsector { min-width: 150px; color: var(--ink-2); }
+      tr.unscored td.col-sector, tr.unscored td.col-subsector { color: var(--ink-2); }
+
+      tr.group-row td {
+        background: var(--unscored-bg);
+        color: var(--ink-2);
+        font-size: 12px;
+        letter-spacing: 0.05em;
+        text-transform: uppercase;
+        font-weight: 700;
+        text-align: left;
+        padding: 9px 10px;
+        border-top: 2px dashed var(--line-strong);
+        border-bottom: 1px solid var(--line);
+      }
+      tr.unscored td {
+        background: var(--unscored-bg);
+        color: var(--ink-3);
+        border-bottom: 1px dashed var(--line);
+      }
+      tr.unscored .ticker { color: var(--ink-2); }
+      tr.unscored td.score {
+        color: var(--ink-3);
+        font-weight: 500;
+        font-style: italic;
+      }
+      tr.unscored td.final-score { font-style: normal; }
+      tbody tr:not(.unscored):not(.group-row):hover td { filter: brightness(0.985); }
+      @media (prefers-color-scheme: dark) {
+        tbody tr:not(.unscored):not(.group-row):hover td { filter: brightness(1.12); }
+      }
+      .empty-note { padding: 26px; text-align: center; color: var(--ink-3); }
+
+      .legend {
+        display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px;
+        margin-top: 14px;
+        font-size: 12.5px; color: var(--ink-2);
+      }
+      .legend .scale {
+        display: inline-block; width: 130px; height: 10px; border-radius: 5px;
+        background: linear-gradient(to right, hsl(4 68% 62%), hsl(45 85% 58%), hsl(130 52% 46%));
+        vertical-align: middle;
+      }
+      footer {
+        margin-top: 22px;
+        font-size: 12.5px;
+        color: var(--ink-3);
+        line-height: 1.55;
+      }
+      footer p { margin: 0 0 6px; }
+
+      /* ---------- Phase 7 recommendation ---------- */
+      .rec-section {
+        margin-top: 28px;
+        border-top: 2px solid var(--line-strong);
+        padding-top: 20px;
+      }
+      .rec-section h2 {
+        font-size: 20px; line-height: 1.25; margin: 0 0 6px; letter-spacing: -0.01em; font-weight: 750;
+      }
+      .rec-section h2 .thin { font-weight: 450; color: var(--ink-2); }
+      .rec-sub { color: var(--ink-2); font-size: 13.5px; margin: 0 0 12px; line-height: 1.55; }
+      .rec-caveats {
+        background: var(--accent-soft); border: 1px solid var(--line); border-radius: 10px;
+        padding: 12px 14px; font-size: 13px; color: var(--ink-2); line-height: 1.55; margin-bottom: 14px;
+      }
+      .rec-caveats strong { color: var(--ink); }
+      .rec-caveats ul { margin: 6px 0 0; padding-left: 18px; }
+      .rec-caveats li { margin: 3px 0; }
+      .rec-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+      .rec-card {
+        background: var(--panel); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+      }
+      .rec-card-head { padding: 14px 16px 10px; border-bottom: 1px solid var(--line); }
+      .rec-rank {
+        display: inline-block; font-size: 11px; font-weight: 800; letter-spacing: .06em; text-transform: uppercase;
+        background: var(--accent); color: #fff; padding: 3px 8px; border-radius: 999px; margin-bottom: 8px;
+      }
+      @media (prefers-color-scheme: dark) { .rec-rank { color: #101311; } }
+      .rec-ticker { font-size: 22px; font-weight: 800; letter-spacing: .01em; line-height: 1; }
+      .rec-action { color: var(--ink-2); font-size: 13.5px; margin-top: 4px; }
+      .rec-action strong { color: var(--ink); }
+      .rec-highlight { display: flex; gap: 8px; flex-wrap: wrap; padding: 12px 16px 0; }
+      .rec-highlight .hl { background: var(--chip-bg); border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px; flex: 1 1 100px; text-align: center; }
+      .rec-highlight .hl b { display: block; font-size: 16px; font-variant-numeric: tabular-nums; color: var(--ink); }
+      .rec-highlight .hl span { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3); font-weight: 700; }
+      .rec-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; padding: 10px 16px 14px; font-variant-numeric: tabular-nums; }
+      .rec-grid div { padding: 6px 0; border-bottom: 1px solid var(--line); font-size: 13.5px; }
+      .rec-grid div:nth-child(odd) { padding-right: 10px; }
+      .rec-grid .k { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--ink-3); font-weight: 700; }
+      .rec-grid .v { font-weight: 650; color: var(--ink); }
+      .rec-note { font-size: 12.5px; color: var(--ink-3); line-height: 1.55; margin-top: 12px; }
+      .rec-empty {
+        background: var(--panel); border: 1px dashed var(--line-strong); border-radius: 12px;
+        padding: 22px 16px; text-align: center; color: var(--ink-2); font-size: 14px;
+      }
+      @media (max-width: 680px) {
+        .rec-cards { grid-template-columns: 1fr; }
+        .rec-section h2 { font-size: 18px; }
+      }
+
+      /* ---------- phone: rows reflow into stacked score grids ---------- */
+      @media (max-width: 680px) {
+        .wrap { padding: 20px 12px 44px; }
+        .run-control { flex-basis: 100%; max-width: none; }
+        .toolbar input[type="search"] { flex-basis: 100%; max-width: none; }
+        header h1 { font-size: 22px; }
+        .table-shell { border-radius: 10px; }
+        table, tbody { display: block; }
+        thead { display: none; }
+        tbody tr {
+          display: grid;
+          grid-template-columns: repeat(4, 1fr);
+          border-bottom: 1px solid var(--line);
+          padding: 8px 6px 10px;
+          gap: 4px;
+        }
+        tbody tr:last-child { border-bottom: none; }
+        tbody td {
+          border-bottom: none;
+          padding: 4px 6px;
+          text-align: center;
+          white-space: normal;
+        }
+        td.ticker-cell {
+          grid-column: 1 / -1;
+          text-align: left;
+          padding-bottom: 2px;
+        }
+        .tmeta {
+          display: inline;
+          font-size: 12.5px;
+          color: var(--ink-2);
+          margin-left: 8px;
+          font-weight: 450;
+        }
+        td.col-price, td.col-cap, td.col-growth, td.col-dcf, td.col-sector, td.col-subsector { display: none; }
+        td.score { min-width: 0; border-radius: 7px; font-size: 15px; }
+        td.score::before {
+          content: attr(data-label);
+          display: block;
+          font-size: 9.5px;
+          font-weight: 650;
+          letter-spacing: 0.05em;
+          text-transform: uppercase;
+          opacity: 0.7;
+          margin-bottom: 1px;
+        }
+        tr.group-row { display: block; padding: 0; }
+        tr.group-row td { display: block; }
+        tr.unscored td.score { background: transparent !important; }
+        tr.unscored td.final-score { grid-column: 1 / -1; text-align: left; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>Options Wheel — Phase 5 Valuation <span class="thin">Heatmap</span></h1>
+        <p class="sub" id="runSub"></p>
+        <p class="meta-line" id="runMeta"></p>
+      </header>
+
+      <div class="method" id="method"></div>
+
+      <div class="stats" id="stats"></div>
+
+      <div class="toolbar">
+        <div class="run-control">
+          <label for="runSelect">Run</label>
+          <select id="runSelect" aria-label="Select run"></select>
+        </div>
+        <input type="search" id="filter" placeholder="Filter by ticker…" aria-label="Filter by ticker" />
+        <span class="hint">Showing the selected run only · ticker filter applies within that run · click a column header to sort · unscored rows stay pinned at the bottom</span>
+      </div>
+
+      <div class="table-shell">
+        <table id="heat" aria-label="Phase 5 valuation scores">
+          <thead>
+            <tr>
+              <th data-key="ticker" scope="col">Ticker</th>
+              <th data-key="price" scope="col">Price</th>
+              <th data-key="market_cap" scope="col">Market Cap</th>
+              <th data-key="growth" scope="col">TTM Rev Growth</th>
+              <th data-key="dcf" scope="col">DCF $</th>
+              <th data-key="business" scope="col">Business (Code)</th>
+              <th data-key="value" scope="col">Value (Code)</th>
+              <th data-key="gav" scope="col">GAV-Code</th>
+              <th data-key="final" scope="col" class="final-col">Final-Code</th>
+              <th data-key="sector" scope="col" class="col-sector">Sector</th>
+              <th data-key="sub_sector" scope="col" class="col-subsector">Sub-sector</th>
+            </tr>
+          </thead>
+          <tbody id="rows"></tbody>
+        </table>
+        <div class="empty-note" id="empty" hidden>No tickers match that filter.</div>
+      </div>
+
+      <div class="legend">
+        <span>Score heat:</span>
+        <span>0 <span class="scale"></span> 100</span>
+        <span>Growth cell tint: green = revenue growing, red = shrinking (intensity ≈ magnitude). Label under each growth figure = its source rung (TTM bridge / quarterly sum / FY annual).</span>
+      </div>
+
+      <footer>
+        <p id="footerSource"></p>
+        <p id="footerNote"></p>
+        <p>Growth provenance: the small label under each growth figure names the fallback-chain rung that produced it — TTM bridge (annual + YTD − prior YTD), quarterly sum (last 4 quarters vs prior 4), or FY annual YoY. A yfinance-sourced figure would be flagged “⚑ yfinance fallback” in amber instead.</p>
+      </footer>
+
+      <section class="rec-section" id="recSection" aria-label="Phase 7 Recommendation — CSP (closing-quote rehearsal)"></section>
+    </div>
+
+    <script>
+      var RUNS_DATA = {"runs":[{"folder":"20261110T034518Z","run_id":"20261110T034515Z-beb17c40","label":"Nov 9, 2026 · 7:45 PM PT — $40 scan cap (dry-run override)","scan_cap_usd":40.0,"cap_basis":"Dry-run override (D-16); real buying power $206.25","cohort":"Phase 4C technical passers (67)","methodology":"dashboard-v5.3+gav-code (D-18 engine fixes)","formula":"Final-Code = 0.5*Business + 0.25*Value + 0.25*GAV-Code (all 0-100, code-only)","scores_note":"Scores regenerated with the current engine (D-18) from the run's own Phase 4C cohort.","rows":[{"ticker":"HRMY","price":33.78,"market_cap":1944325118.0,"status":"ok","failure_reason":null,"business":85.3,"value":87.3,"gav_code":68.7,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":19.785360750849932,"gav_code_source":"ttm_bridge","fallback":null,"dcf":172.64,"final_code":81.6,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"BRBR","price":9.74,"market_cap":1065108257.0,"status":"ok","failure_reason":null,"business":55.0,"value":97.2,"gav_code":66.1,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":5.8627821239097155,"gav_code_source":"ttm_bridge","fallback":null,"dcf":147.56,"final_code":68.3,"sector":"Consumer Defensive","sub_sector":"Packaged Foods"},{"ticker":"LGN","price":32.68,"market_cap":2150245514.0,"status":"ok","failure_reason":null,"business":49.7,"value":92.6,"gav_code":78.8,"gav_label":"📈💵 Strong — climbing growth, solid cash","ttm_revenue_growth_pct":21.532858541066858,"gav_code_source":"fy_annual","fallback":null,"dcf":64.91,"final_code":67.7,"sector":"Industrials","sub_sector":"Engineering & Construction"},{"ticker":"UNIT","price":4.38,"market_cap":1262170702.0,"status":"ok","failure_reason":null,"business":54.4,"value":76.4,"gav_code":85.7,"gav_label":"🚀💰 Elite — rocket growth, bag of value","ttm_revenue_growth_pct":127.3997268098845,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":67.7,"sector":"Real Estate","sub_sector":"REIT - Specialty"},{"ticker":"NRIX","price":15.99,"market_cap":1671522154.0,"status":"ok","failure_reason":null,"business":44.2,"value":89.5,"gav_code":92.2,"gav_label":"🚀💰 Elite — rocket growth, bag of value","ttm_revenue_growth_pct":738.7634877579552,"gav_code_source":"ttm_bridge","fallback":null,"dcf":84.75,"final_code":67.5,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"INOD","price":37.1,"market_cap":1273189566.0,"status":"ok","failure_reason":null,"business":74.3,"value":52.0,"gav_code":66.0,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":46.86812011724892,"gav_code_source":"ttm_bridge","fallback":null,"dcf":24.74,"final_code":66.7,"sector":"Technology","sub_sector":"Information Technology Services"},{"ticker":"SMCI","price":28.45,"market_cap":18894324443.0,"status":"ok","failure_reason":null,"business":56.2,"value":70.2,"gav_code":82.6,"gav_label":"📈💵 Strong — climbing growth, solid cash","ttm_revenue_growth_pct":156.458468550357,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":66.3,"sector":"Technology","sub_sector":"Computer Hardware"},{"ticker":"ADEA","price":16.28,"market_cap":1710145357.0,"status":"ok","failure_reason":null,"business":61.4,"value":65.5,"gav_code":65.2,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":22.06089831329361,"gav_code_source":"ttm_bridge","fallback":null,"dcf":17.34,"final_code":63.4,"sector":"Technology","sub_sector":"Software - Application"},{"ticker":"NUVB","price":4.49,"market_cap":1468553374.0,"status":"ok","failure_reason":null,"business":25.4,"value":96.4,"gav_code":95.7,"gav_label":"🚀💰 Elite — rocket growth, bag of value","ttm_revenue_growth_pct":654.1909675489757,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":60.7,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"HIMS","price":21.97,"market_cap":6066148738.0,"status":"ok","failure_reason":null,"business":61.2,"value":55.9,"gav_code":60.5,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":29.7857761205776,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":59.7,"sector":"Healthcare","sub_sector":"Drug Manufacturers - Specialty & Generic"},{"ticker":"FIGR","price":24.25,"market_cap":5098987140.0,"status":"ok","failure_reason":null,"business":64.6,"value":45.6,"gav_code":62.8,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":48.69090749079601,"gav_code_source":"fy_annual","fallback":null,"dcf":null,"final_code":59.4,"sector":"Financial Services","sub_sector":"Capital Markets"},{"ticker":"GLXY","price":14.4,"market_cap":2617288075.0,"status":"ok","failure_reason":null,"business":47.8,"value":64.1,"gav_code":72.0,"gav_label":"📈💵 Strong — climbing growth, solid cash","ttm_revenue_growth_pct":41.739476618166904,"gav_code_source":"fy_annual","fallback":null,"dcf":null,"final_code":57.9,"sector":"Financial Services","sub_sector":"Capital Markets"},{"ticker":"INNV","price":9.21,"market_cap":1222650293.0,"status":"ok","failure_reason":null,"business":47.9,"value":72.6,"gav_code":61.3,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":15.112777535375098,"gav_code_source":"ttm_bridge","fallback":null,"dcf":13.12,"final_code":57.4,"sector":"Healthcare","sub_sector":"Medical Care Facilities"},{"ticker":"AVAH","price":13.28,"market_cap":2891260096.0,"status":"ok","failure_reason":null,"business":45.4,"value":73.5,"gav_code":61.8,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":19.523050303259627,"gav_code_source":"ttm_bridge","fallback":null,"dcf":17.24,"final_code":56.5,"sector":"Healthcare","sub_sector":"Medical Care Facilities"},{"ticker":"SYM","price":37.7,"market_cap":4781937888.0,"status":"ok","failure_reason":null,"business":31.9,"value":81.8,"gav_code":73.4,"gav_label":"📈💵 Strong — climbing growth, solid cash","ttm_revenue_growth_pct":20.64398542473864,"gav_code_source":"ttm_bridge","fallback":null,"dcf":89.28,"final_code":54.8,"sector":"Industrials","sub_sector":"Specialty Industrial Machinery"},{"ticker":"AMSC","price":25.49,"market_cap":1136755637.0,"status":"ok","failure_reason":null,"business":52.6,"value":54.2,"gav_code":59.6,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":31.08379619719315,"gav_code_source":"ttm_bridge","fallback":null,"dcf":17.87,"final_code":54.8,"sector":"Industrials","sub_sector":"Specialty Industrial Machinery"},{"ticker":"EQPT","price":15.7007,"market_cap":3718292256.0,"status":"ok","failure_reason":null,"business":53.6,"value":67.3,"gav_code":43.7,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":3.1866464339908918,"gav_code_source":"fy_annual","fallback":null,"dcf":null,"final_code":54.5,"sector":"Industrials","sub_sector":"Rental & Leasing Services"},{"ticker":"VG","price":11.91,"market_cap":28826070571.0,"status":"ok","failure_reason":null,"business":45.7,"value":52.5,"gav_code":73.8,"gav_label":"📈💵 Strong — climbing growth, solid cash","ttm_revenue_growth_pct":100.72232089994077,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":54.4,"sector":"Energy","sub_sector":"Oil & Gas Midstream"},{"ticker":"VIAV","price":31.86,"market_cap":7000173202.0,"status":"ok","failure_reason":null,"business":62.0,"value":34.1,"gav_code":57.0,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":47.44149493538246,"gav_code_source":"ttm_bridge","fallback":null,"dcf":5.9,"final_code":53.8,"sector":"Technology","sub_sector":"Communication Equipment"},{"ticker":"VISN","price":4.19,"market_cap":1266139001.0,"status":"ok","failure_reason":null,"business":49.0,"value":73.7,"gav_code":39.4,"gav_label":"🧊🚫 None — frozen growth, no value","ttm_revenue_growth_pct":-360.6132698916204,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":52.8,"sector":"Technology","sub_sector":"Communication Equipment"},{"ticker":"RARE","price":16.35,"market_cap":1572178748.0,"status":"ok","failure_reason":null,"business":49.5,"value":55.7,"gav_code":52.9,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":15.754138210441027,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":51.9,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"FPS","price":22.59,"market_cap":5347787791.0,"status":"ok","failure_reason":null,"business":47.4,"value":42.6,"gav_code":68.8,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":88.53978024078981,"gav_code_source":"fy_annual","fallback":null,"dcf":null,"final_code":51.5,"sector":"Industrials","sub_sector":"Electrical Equipment & Parts"},{"ticker":"FIG","price":19.41,"market_cap":10075282085.0,"status":"ok","failure_reason":null,"business":58.0,"value":31.3,"gav_code":55.6,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":44.35243256408694,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":50.7,"sector":"Technology","sub_sector":"Software - Application"},{"ticker":"ALGM","price":30.91,"market_cap":5253236025.0,"status":"ok","failure_reason":null,"business":62.8,"value":29.3,"gav_code":47.1,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":27.92115627318794,"gav_code_source":"ttm_bridge","fallback":null,"dcf":3.72,"final_code":50.5,"sector":"Technology","sub_sector":"Semiconductors"},{"ticker":"SRPT","price":17.49,"market_cap":1913087528.0,"status":"ok","failure_reason":null,"business":43.2,"value":75.5,"gav_code":40.2,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":-36.583607067739536,"gav_code_source":"ttm_bridge","fallback":null,"dcf":24.48,"final_code":50.5,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"AGIO","price":31.98,"market_cap":1759001835.0,"status":"ok","failure_reason":null,"business":60.2,"value":20.5,"gav_code":57.8,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":214.44486615614747,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":49.7,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"HROW","price":31.89,"market_cap":1008048286.0,"status":"ok","failure_reason":null,"business":48.1,"value":45.1,"gav_code":55.0,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":21.280824821429988,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":49.1,"sector":"Healthcare","sub_sector":"Drug Manufacturers - Specialty & Generic"},{"ticker":"ATEC","price":7.46,"market_cap":1140788770.0,"status":"ok","failure_reason":null,"business":40.9,"value":58.2,"gav_code":54.1,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":15.34312244169116,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":48.5,"sector":"Healthcare","sub_sector":"Medical Devices"},{"ticker":"ZETA","price":31.17,"market_cap":7788952162.0,"status":"ok","failure_reason":null,"business":53.3,"value":30.7,"gav_code":55.4,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":40.96201283086594,"gav_code_source":"ttm_bridge","fallback":null,"dcf":4.67,"final_code":48.2,"sector":"Technology","sub_sector":"Software - Infrastructure"},{"ticker":"URGN","price":26.83,"market_cap":1213933619.0,"status":"ok","failure_reason":null,"business":46.5,"value":34.8,"gav_code":64.9,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":159.2865431638278,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":48.2,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"CFFN","price":8.6,"market_cap":1040989186.0,"status":"ok","failure_reason":null,"business":47.6,"value":48.7,"gav_code":41.9,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":6.5359477124183,"gav_code_source":"fy_annual","fallback":null,"dcf":28.62,"final_code":46.5,"sector":"Financial Services","sub_sector":"Banks - Regional"},{"ticker":"CAI","price":25.57,"market_cap":7238440880.0,"status":"ok","failure_reason":null,"business":42.6,"value":33.3,"gav_code":64.2,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":61.48364871152525,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":45.7,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"SOUN","price":4.05,"market_cap":2007078769.0,"status":"ok","failure_reason":null,"business":50.8,"value":26.7,"gav_code":53.4,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":50.653621196194166,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":45.4,"sector":"Technology","sub_sector":"Software - Application"},{"ticker":"VOYG","price":27.66,"market_cap":1489119271.0,"status":"ok","failure_reason":null,"business":42.3,"value":37.4,"gav_code":58.7,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":41.83261366522733,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":45.2,"sector":"Industrials","sub_sector":"Aerospace & Defense"},{"ticker":"CLSK","price":6.8,"market_cap":1578140913.0,"status":"ok","failure_reason":null,"business":28.5,"value":48.1,"gav_code":71.5,"gav_label":"📈💵 Strong — climbing growth, solid cash","ttm_revenue_growth_pct":102.21074074855925,"gav_code_source":"fy_annual","fallback":null,"dcf":null,"final_code":44.1,"sector":"Financial Services","sub_sector":"Capital Markets"},{"ticker":"VSTM","price":8.75,"market_cap":1061032048.0,"status":"ok","failure_reason":null,"business":44.7,"value":22.7,"gav_code":58.9,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":649.6524403916585,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":42.8,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"SAIL","price":20.4,"market_cap":10967212469.0,"status":"ok","failure_reason":null,"business":54.0,"value":19.2,"gav_code":42.1,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":20.133538512915283,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":42.3,"sector":"Technology","sub_sector":"Software - Infrastructure"},{"ticker":"PL","price":14.26,"market_cap":4566292261.0,"status":"ok","failure_reason":null,"business":49.7,"value":19.6,"gav_code":49.8,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":44.12182679229324,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":42.2,"sector":"Industrials","sub_sector":"Aerospace & Defense"},{"ticker":"ONDS","price":5.9,"market_cap":3109496412.0,"status":"ok","failure_reason":null,"business":48.1,"value":13.8,"gav_code":54.4,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":979.2306538376187,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":41.1,"sector":"Technology","sub_sector":"Communication Equipment"},{"ticker":"IBRX","price":7.11,"market_cap":9151686217.0,"status":"ok","failure_reason":null,"business":48.4,"value":8.1,"gav_code":51.5,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":121.1519592998607,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":39.1,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"LCID","price":3.51,"market_cap":1296490879.0,"status":"ok","failure_reason":null,"business":15.4,"value":54.7,"gav_code":67.3,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":46.48640633373158,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":38.2,"sector":"Consumer Cyclical","sub_sector":"Auto Manufacturers"},{"ticker":"IONQ","price":34.19,"market_cap":15158381073.0,"status":"ok","failure_reason":null,"business":40.8,"value":15.0,"gav_code":55.0,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":376.52562753644975,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":37.9,"sector":"Technology","sub_sector":"Computer Hardware"},{"ticker":"ASTS","price":36.34,"market_cap":9692188230.0,"status":"ok","failure_reason":null,"business":43.4,"value":11.2,"gav_code":53.1,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":671.0323242134801,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":37.8,"sector":"Technology","sub_sector":"Communication Equipment"},{"ticker":"QUBT","price":6.61,"market_cap":1432775630.0,"status":"ok","failure_reason":null,"business":44.9,"value":8.9,"gav_code":52.0,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":3368.8644688644686,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":37.7,"sector":"Technology","sub_sector":"Computer Hardware"},{"ticker":"S","price":23.34,"market_cap":7577029276.0,"status":"ok","failure_reason":null,"business":41.2,"value":23.5,"gav_code":44.2,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":21.085189132238824,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":37.5,"sector":"Technology","sub_sector":"Software - Infrastructure"},{"ticker":"BEAM","price":27.25,"market_cap":2732802479.0,"status":"ok","failure_reason":null,"business":44.7,"value":7.3,"gav_code":51.1,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":163.26995924669214,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":37.0,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"SBET","price":6.13,"market_cap":1355475288.0,"status":"ok","failure_reason":null,"business":43.5,"value":8.9,"gav_code":52.0,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":303.01128752091176,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":37.0,"sector":"Financial Services","sub_sector":"Capital Markets"},{"ticker":"PGEN","price":4.85,"market_cap":1602718410.0,"status":"ok","failure_reason":null,"business":37.6,"value":15.7,"gav_code":55.4,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":146.72611464968153,"gav_code_source":"fy_annual","fallback":null,"dcf":null,"final_code":36.6,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"NVAX","price":10.84,"market_cap":1778797117.0,"status":"ok","failure_reason":null,"business":39.7,"value":40.0,"gav_code":22.5,"gav_label":"🧊🚫 None — frozen growth, no value","ttm_revenue_growth_pct":-61.33484118269743,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":35.5,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"IOVA","price":8.22,"market_cap":3717434138.0,"status":"ok","failure_reason":null,"business":35.1,"value":20.0,"gav_code":50.0,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":51.33592892083458,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":35.0,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"APLD","price":16.43,"market_cap":4702120027.0,"status":"ok","failure_reason":null,"business":21.4,"value":26.8,"gav_code":60.9,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":217.58212150560342,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":32.6,"sector":"Technology","sub_sector":"Information Technology Services"},{"ticker":"BFLY","price":6.77,"market_cap":1703732512.0,"status":"ok","failure_reason":null,"business":34.5,"value":10.1,"gav_code":45.0,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":39.35464176286363,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":31.0,"sector":"Healthcare","sub_sector":"Medical Devices"},{"ticker":"KEEL","price":1.94,"market_cap":1154794620.0,"status":"ok","failure_reason":null,"business":23.5,"value":17.5,"gav_code":56.2,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":72.03355493194472,"gav_code_source":"fy_annual","fallback":null,"dcf":null,"final_code":30.2,"sector":"Technology","sub_sector":"Information Technology Services"},{"ticker":"RXRX","price":3.76,"market_cap":2209512067.0,"status":"ok","failure_reason":null,"business":32.4,"value":6.7,"gav_code":43.4,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":56.176611961821045,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":28.7,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"NTLA","price":12.11,"market_cap":1589036698.0,"status":"ok","failure_reason":null,"business":49.5,"value":7.6,"gav_code":6.3,"gav_label":"🧊🚫 None — frozen growth, no value","ttm_revenue_growth_pct":-8.067375886524818,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":28.2,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"TNGX","price":22.73,"market_cap":3622593734.0,"status":"ok","failure_reason":null,"business":45.2,"value":12.2,"gav_code":8.6,"gav_label":"🧊🚫 None — frozen growth, no value","ttm_revenue_growth_pct":-100.0,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":27.8,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"WULF","price":12.26,"market_cap":5673273857.0,"status":"ok","failure_reason":null,"business":31.4,"value":12.2,"gav_code":31.1,"gav_label":"🧊🚫 None — frozen growth, no value","ttm_revenue_growth_pct":13.866614161953184,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":26.5,"sector":"Financial Services","sub_sector":"Capital Markets"},{"ticker":"QBTS","price":11.51,"market_cap":4054412386.0,"status":"ok","failure_reason":null,"business":43.8,"value":9.7,"gav_code":7.3,"gav_label":"🧊🚫 None — frozen growth, no value","ttm_revenue_growth_pct":-44.21997755331088,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":26.1,"sector":"Technology","sub_sector":"Computer Hardware"},{"ticker":"ZBIO","price":27.5,"market_cap":1916191741.0,"status":"ok","failure_reason":null,"business":16.7,"value":10.3,"gav_code":52.6,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":100.0,"gav_code_source":"fy_annual","fallback":null,"dcf":null,"final_code":24.1,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"BMNR","price":18.39,"market_cap":11316527151.0,"status":"ok","failure_reason":null,"business":12.4,"value":9.3,"gav_code":52.1,"gav_label":"📉💸 Thin — sliding growth, money leaking","ttm_revenue_growth_pct":1022.414224131053,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":21.6,"sector":"Financial Services","sub_sector":"Capital Markets"},{"ticker":"CIFR","price":6.73,"market_cap":2984627839.0,"status":"ok","failure_reason":null,"business":33.6,"value":9.7,"gav_code":7.3,"gav_label":"🧊🚫 None — frozen growth, no value","ttm_revenue_growth_pct":-29.239927538337838,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":21.1,"sector":"Technology","sub_sector":"Information Technology Services"},{"ticker":"TSHA","price":4.37,"market_cap":1414117585.0,"status":"ok","failure_reason":null,"business":28.4,"value":8.0,"gav_code":6.5,"gav_label":"🧊🚫 None — frozen growth, no value","ttm_revenue_growth_pct":-32.267226475673006,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":17.8,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"MARA","price":6.58,"market_cap":2453000535.0,"status":"ok","failure_reason":null,"business":7.5,"value":9.5,"gav_code":7.2,"gav_label":"🧊🚫 None — frozen growth, no value","ttm_revenue_growth_pct":-2.9118220310504705,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":7.9,"sector":"Financial Services","sub_sector":"Capital Markets"},{"ticker":"GENB","price":13.92,"market_cap":1676282814.0,"status":"insufficient_data","failure_reason":"RuntimeError: No 10-K found in EDGAR submissions for CIK 0002100782","sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"AADX","price":11.09,"market_cap":1667045319.0,"status":"insufficient_data","failure_reason":"RuntimeError: No 10-K found in EDGAR submissions for CIK 0002118195","sector":"Industrials","sub_sector":"Aerospace & Defense"},{"ticker":"QNT","price":39.77,"market_cap":1473162205.0,"status":"insufficient_data","failure_reason":"RuntimeError: No 10-K found in EDGAR submissions for CIK 0002110105","sector":"Technology","sub_sector":"Software - Application"},{"ticker":"SECZ","price":7.7,"market_cap":1136329167.0,"status":"insufficient_data","failure_reason":"RuntimeError: No 10-K found in EDGAR submissions for CIK 0002094496","sector":"Technology","sub_sector":"Software - Application"}]},{"folder":"20261110T022551Z","run_id":"20261110T022548Z-765de2a3","label":"Nov 9, 2026 · 6:25 PM PT — $2.06 cap (live account)","scan_cap_usd":2.0625,"cap_basis":"Live buying power $206.25 / 100","cohort":"Phase 4C technical passers (3)","methodology":"dashboard-v5.3+gav-code (D-18 engine fixes)","formula":"Final-Code = 0.5*Business + 0.25*Value + 0.25*GAV-Code (all 0-100, code-only)","scores_note":"Scores regenerated with the current engine (D-18) from the run's own Phase 4C cohort.","rows":[{"ticker":"GERN","price":0.9932,"market_cap":635928177.0,"status":"ok","failure_reason":null,"business":20.5,"value":50.9,"gav_code":58.0,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":24.682832116144127,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":37.5,"sector":"Healthcare","sub_sector":"Biotechnology"},{"ticker":"EOSE","price":1.89,"market_cap":637473358.0,"status":"ok","failure_reason":null,"business":16.7,"value":36.2,"gav_code":65.6,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":319.91080714803496,"gav_code_source":"ttm_bridge","fallback":null,"dcf":null,"final_code":33.8,"sector":"Industrials","sub_sector":"Electrical Equipment & Parts"},{"ticker":"KEEL","price":1.97,"market_cap":1154794620.0,"status":"ok","failure_reason":null,"business":23.5,"value":17.5,"gav_code":56.2,"gav_label":"⚖️🪙 Fair — balanced growth, a coin’s worth of value","ttm_revenue_growth_pct":72.03355493194472,"gav_code_source":"fy_annual","fallback":null,"dcf":null,"final_code":30.2,"sector":"Technology","sub_sector":"Information Technology Services"}]}]};
+      var RUNS = RUNS_DATA.runs || [];
+
+      var state = { key: "final", dir: -1, q: "", runIndex: 0 };
+      var dark = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches;
+
+      function heat(score) {
+        if (score === null || score === undefined) return "";
+        var hue = 4 + (score / 100) * 126; /* red -> yellow -> green */
+        var light = dark ? 30 : 80 - Math.abs(score - 50) * 0.12;
+        var sat = dark ? 48 : 62;
+        return "background-color: hsl(" + hue.toFixed(0) + " " + sat + "% " + light.toFixed(0) + "%);";
+      }
+      function growthStyle(g) {
+        if (g === null || g === undefined) return "";
+        var mag = Math.min(1, Math.log10(Math.abs(g) + 1) / 2.2); /* compress huge % */
+        var a = (0.10 + mag * 0.30).toFixed(2);
+        if (g >= 0) return "background-color: hsla(135, 55%, " + (dark ? "45%" : "38%") + ", " + a + ");";
+        return "background-color: hsla(4, 65%, " + (dark ? "50%" : "42%") + ", " + a + ");";
+      }
+      function fmtPrice(p) { return (p === null || p === undefined) ? "—" : "$" + p.toFixed(2); }
+      function fmtDCF(v) { if (v === null || v === undefined) return "n/m"; return "$" + v.toFixed(2); }
+      function fmtCap(c) {
+        if (c === null || c === undefined) return "—";
+        if (c >= 1e9) return "$" + (c / 1e9).toFixed(2) + "B";
+        return "$" + Math.round(c / 1e6) + "M";
+      }
+      function fmtGrowth(g) {
+        if (g === null || g === undefined) return "—";
+        var s = (g > 0 ? "+" : "") + g.toFixed(1) + "%";
+        return s;
+      }
+      function fmtScore(v) { return v === null || v === undefined ? "—" : v.toFixed(1); }
+      function bandOf(label) {
+        if (!label) return "";
+        var m = label.match(/(Elite|Strong|Fair|Thin|None)/);
+        return m ? m[1] : "";
+      }
+      function growthSrcLabel(r) {
+        if (r.fallback) return "⚑ yfinance fallback";
+        switch (r.gav_code_source) {
+          case "ttm_bridge": return "TTM bridge";
+          case "quarterly_sum": return "Quarterly sum";
+          case "fy_annual": return "FY annual";
+          case "yfinance_annual_fallback": return "⚑ yfinance fallback";
+        }
+        return "";
+      }
+      function reasonText(r) {
+        if (!r.failure_reason) return "";
+        if (r.failure_reason.indexOf("No 10-K found") !== -1) return "No 10-K found in EDGAR";
+        return r.failure_reason;
+      }
+
+      function esc(s) {
+        if (s === null || s === undefined) return "";
+        return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+      }
+      function currentRun() { return RUNS[state.runIndex] || RUNS[0] || { rows: [] }; }
+      function currentRows() {
+        var run = currentRun();
+        var rows = run.rows || [];
+        // Normalize rows from the JSON: fields absent on unscored rows become null (never recomputed).
+        return rows.map(function (r) {
+          var keys = ["business","value","gav_code","gav_label","ttm_revenue_growth_pct","gav_code_source","fallback","dcf","final_code","failure_reason","sector","sub_sector"];
+          var o = {};
+          for (var k in r) o[k] = r[k];
+          keys.forEach(function (key) { if (o[key] === undefined) o[key] = null; });
+          return o;
+        });
+      }
+      function fmtCapUsd(v) {
+        if (v === null || v === undefined) return "";
+        return "$" + Number(v).toFixed(2);
+      }
+      function renderChrome() {
+        var run = currentRun();
+        var rows = currentRows();
+        var scoredCount = rows.filter(function (r) { return r.final_code !== null && r.final_code !== undefined; }).length;
+        var subEl = document.getElementById("runSub");
+        if (subEl) subEl.textContent = (run.label || "") + (run.cohort ? " · " + run.cohort : "") + " — code-only scores, no model scorers.";
+        var metaEl = document.getElementById("runMeta");
+        if (metaEl) metaEl.textContent = "run " + (run.run_id || "") + (run.scan_cap_usd !== undefined && run.scan_cap_usd !== null ? " · scan cap " + fmtCapUsd(run.scan_cap_usd) : "");
+        var methodEl = document.getElementById("method");
+        if (methodEl) {
+          methodEl.innerHTML =
+            "<strong>Methodology:</strong> " + esc(run.methodology || "") + " &nbsp;·&nbsp; " +
+            '<span class="formula">' + esc(run.formula || "") + "</span>" +
+            " &nbsp;·&nbsp; all scores 0–100, computed from filed financials only. " +
+            "GAV-Code = 0.5 × revenue-growth band + 0.5 × Value. Growth comes from a fallback chain — <strong>TTM bridge → quarterly-sum TTM → FY-annual YoY</strong> — and each row\u2019s growth cell is labeled with the rung that produced it. If no EDGAR rung works, a flagged yfinance annual fallback may fill the band. Names the engine could not score fail closed and sit at the bottom with the reason. DCF $ = engine DCF fair value per share; n/m = DCF leg excluded (non-positive owner FCF base). Sector / Sub-sector: Yahoo sector and industry classification." +
+            '<div class="run-note"><strong>Run:</strong> ' + esc(run.label || "") +
+            (run.cohort ? ' &nbsp;·&nbsp; <strong>Cohort:</strong> ' + esc(run.cohort) : "") +
+            '<div class="cap-line"><strong>Cap basis:</strong> ' + esc(run.cap_basis || "") + "</div>" +
+            (run.scores_note ? '<div class="cap-line"><strong>Scores note:</strong> ' + esc(run.scores_note) + "</div>" : "") +
+            "</div>";
+        }
+        var fs = document.getElementById("footerSource");
+        if (fs) fs.innerHTML = "Source: options wheel agent run " + '<span style="font-family: ui-monospace, Menlo, monospace;">' + esc(run.run_id || "") + "</span>" + (run.label ? " — " + esc(run.label) : "") + (run.cohort ? ". Cohort: " + esc(run.cohort) : "") + (run.cap_basis ? ". Cap basis: " + esc(run.cap_basis) + "." : ".") + " Prices and market caps are as captured by the scan for this run.";
+        var fn = document.getElementById("footerNote");
+        if (fn) {
+          var unscored = rows.length - scoredCount;
+          fn.textContent = (run.scores_note ? run.scores_note + " " : "") + (unscored ? unscored + " row" + (unscored === 1 ? " is" : "s are") + " unscored in this run — fail-closed exclusions, not zeros; each is pinned at the bottom with its reason." : "All rows in this run scored.");
+        }
+      }
+      function renderStats() {
+        var rows = currentRows();
+        var scored = rows.filter(function (r) { return r.final_code !== null && r.final_code !== undefined; });
+        var el = document.getElementById("stats");
+        if (!el) return;
+        if (!scored.length) {
+          el.innerHTML =
+            '<span class="stat"><b>' + rows.length + "</b> names evaluated in Phase 5</span>" +
+            '<span class="stat"><b>0</b> scored</span>' +
+            '<span class="stat"><b>' + rows.length + "</b> unscored (fail-closed)</span>";
+          return;
+        }
+        var top = scored.slice().sort(function (a, b) { return b.final_code - a.final_code; })[0];
+        var elite = scored.filter(function (r) { return bandOf(r.gav_label) === "Elite"; }).length;
+        el.innerHTML =
+          '<span class="stat"><b>' + rows.length + "</b> names evaluated in Phase 5</span>" +
+          '<span class="stat"><b>' + scored.length + "</b> scored</span>" +
+          '<span class="stat"><b>' + (rows.length - scored.length) + "</b> unscored (fail-closed)</span>" +
+          '<span class="stat">Top Final-Code: <b>' + esc(top.ticker) + " " + top.final_code.toFixed(1) + "</b></span>" +
+          '<span class="stat"><b>' + elite + "</b> GAV-Code Elite</span>" +
+          '<span class="stat">Growth source: <b>' + scored.filter(function (r) { return r.gav_code_source === "ttm_bridge"; }).length + "</b> TTM bridge · <b>" + scored.filter(function (r) { return r.gav_code_source === "quarterly_sum"; }).length + "</b> quarterly sum · <b>" + scored.filter(function (r) { return r.gav_code_source === "fy_annual"; }).length + "</b> FY annual · <b>" + scored.filter(function (r) { return r.fallback || r.gav_code_source === "yfinance_annual_fallback"; }).length + "</b> yfinance fallback</span>";
+      }
+      /* Phase 7 recommendations, keyed by run_id — only the $40 run has one. */
+      var REC_BY_RUN = {
+        "20261110T034515Z-beb17c40": {
+          title: "Phase 7 Recommendation — CSP (closing-quote rehearsal)",
+          picks: [
+            { rank: 1, ticker: "HIMS", action: "Sell cash-secured put", expiration: "2026-12-18", dte: 39, strike: 22.00, underlying: 22.935, bid: 2.08, ask: 2.30, premium: 208, netCollateral: 1992, netRoc: 10.44, pop: 0.638, delta: -0.382, spreadPct: 10.0, oi: 2311, volume: 92, maxContracts: 2, finalCode: 59.7, business: 61.2, value: 55.9, mode: "strict" },
+            { rank: 2, ticker: "SMCI", action: "Sell cash-secured put", expiration: "2026-12-18", dte: 39, strike: 28.00, underlying: 28.605, bid: 2.42, ask: 2.60, premium: 242, netCollateral: 2558, netRoc: 9.46, pop: 0.634, delta: -0.411, spreadPct: 7.2, oi: 6103, volume: 3394, maxContracts: 1, finalCode: 66.3, business: 56.2, value: 70.2, mode: "strict" }
+          ]
+        }
+      };
+      function money(v){ return "$" + Number(v).toLocaleString("en-US",{minimumFractionDigits:2, maximumFractionDigits:2}); }
+      function money0(v){ return "$" + Number(v).toLocaleString("en-US"); }
+      function renderRec() {
+        var el = document.getElementById("recSection");
+        if (!el) return;
+        var run = currentRun();
+        var rec = REC_BY_RUN[run.run_id];
+        if (!rec) {
+          el.innerHTML = '<h2>Phase 7 Recommendation <span class="thin">— CSP</span></h2>' +
+            '<div class="rec-empty">No Phase 6/7 recommendation has been added for this run yet.</div>';
+          return;
+        }
+        var cards = rec.picks.map(function(p){
+          function row(k,v){ return '<div><span class="k">'+k+'</span><span class="v">'+v+'</span></div>'; }
+          return '<article class="rec-card">' +
+            '<div class="rec-card-head"><span class="rec-rank">Rank '+p.rank+'</span><div class="rec-ticker">'+esc(p.ticker)+'</div><div class="rec-action"><strong>'+esc(p.action)+'</strong> · Exp '+esc(p.expiration)+' · '+p.dte+' DTE · Qualification: '+esc(p.mode)+'</div></div>' +
+            '<div class="rec-highlight"><div class="hl"><b>'+p.netRoc.toFixed(2)+'%</b><span>Net ROC</span></div><div class="hl"><b>'+p.pop.toFixed(3)+'</b><span>POP</span></div><div class="hl"><b>'+money0(p.premium)+'</b><span>Premium / contract</span></div></div>' +
+            '<div class="rec-grid">' +
+              row("Strike", money(p.strike)) + row("Underlying", "$" + p.underlying.toFixed(3)) +
+              row("Bid", money(p.bid)) + row("Ask", money(p.ask)) +
+              row("Net collateral", money0(p.netCollateral)+" / contract") + row("Independent max contracts*", String(p.maxContracts)) +
+              row("Delta", p.delta.toFixed(3)) + row("Spread", p.spreadPct.toFixed(1)+"% of mid") +
+              row("Open interest", p.oi.toLocaleString("en-US")) + row("Daily volume", p.volume.toLocaleString("en-US")) +
+              row("Final-Code", p.finalCode.toFixed(1)) + row("Business / Value", p.business.toFixed(1)+" / "+p.value.toFixed(1)) +
+            '</div></article>';
+        }).join("");
+        el.innerHTML =
+          '<h2>Phase 7 Recommendation <span class="thin">— CSP (closing-quote rehearsal)</span></h2>' +
+          '<p class="rec-sub">Phase 6 + Phase 7 rehearsal for this run only — <strong>' + esc(run.label || "") + '</strong>. Rank 1 is HIMS, Rank 2 is SMCI.</p>' +
+          '<div class="rec-caveats"><strong>Context &amp; caveats</strong><ul>' +
+          '<li><strong>Source:</strong> Phase 6 + Phase 7 rehearsal on Nov 9, 2026 using last closing quotes (quote time 2026-11-09 20:59:59 UTC; about 8.6 hours old). The quote-freshness relaxation was harness-only; production gates are unchanged.</li>' +
+          '<li><strong>Buying-power premise:</strong> $4,000 to match the $40 scan cap. Actual agentic account buying power was $206.25, which funds neither contract. No orders were placed; order lifecycle phases remain disabled.</li>' +
+          '<li><strong>Path:</strong> primary cohort HRMY, BRBR, LGN, UNIT, NRIX qualified 0 in the strict 30–45 DTE window; selected attempt was strict_top_6_10 from the secondary cohort; fallback DTE was not used in the run. A separate forced probe of the primary cohort in the 25–60 DTE fallback window also qualified 0.</li>' +
+          '</ul></div>' +
+          '<div class="rec-cards">' + cards + '</div>' +
+          '<p class="rec-note">* “Independent max contracts” is a per-contract mathematical maximum at the $4,000 premise, not a simultaneous portfolio allocation — the two picks are not sized to be bought together. Figures are closing-quote values from the rehearsal and will differ at the next open.</p>';
+      }
+      function renderAll() { renderChrome(); renderStats(); render(); renderRec(); }
+
+      function sortVal(r, key) {
+        var v = null;
+        switch (key) {
+          case "ticker": v = r.ticker; break;
+          case "price": v = r.price; break;
+          case "market_cap": v = r.market_cap; break;
+          case "growth": v = r.ttm_revenue_growth_pct; break;
+          case "dcf": v = r.dcf; break;
+          case "business": v = r.business; break;
+          case "value": v = r.value; break;
+          case "gav": v = r.gav_code; break;
+          case "final": v = r.final_code; break;
+          case "sector": v = r.sector; break;
+          case "sub_sector": v = r.sub_sector; break;
+        }
+        return v === undefined ? null : v;
+      }
+
+      function render() {
+        var q = state.q.trim().toUpperCase();
+        var scored = [], unscored = [];
+        currentRows().forEach(function (r) {
+          if (q && r.ticker.indexOf(q) === -1) return;
+          ((r.final_code === null || r.final_code === undefined) ? unscored : scored).push(r);
+        });
+        var dir = state.dir, key = state.key;
+        scored.sort(function (a, b) {
+          var va = sortVal(a, key), vb = sortVal(b, key);
+          if ((va === null || va === undefined) && (vb === null || vb === undefined)) return 0;
+          if (va === null || va === undefined) return 1;
+          if (vb === null || vb === undefined) return -1;
+          if (typeof va === "string") return va.localeCompare(vb) * dir;
+          return (va - vb) * dir;
+        });
+        unscored.sort(function (a, b) { return (b.market_cap || 0) - (a.market_cap || 0); });
+
+        var html = "";
+        scored.forEach(function (r) { html += rowHtml(r, false); });
+        if (unscored.length) {
+          html += '<tr class="group-row"><td colspan="11">Unscored — excluded fail-closed (' + unscored.length + ")</td></tr>";
+          unscored.forEach(function (r) { html += rowHtml(r, true); });
+        }
+        document.getElementById("rows").innerHTML = html;
+        document.getElementById("empty").hidden = (scored.length + unscored.length) > 0;
+        document.getElementById("heat").style.display = (scored.length + unscored.length) ? "" : "none";
+
+        var ths = document.querySelectorAll("thead th");
+        ths.forEach(function (th) {
+          var arrow = th.querySelector(".arrow");
+          if (arrow) arrow.remove();
+          if (th.getAttribute("data-key") === key) {
+            var s = document.createElement("span");
+            s.className = "arrow";
+            s.textContent = dir === -1 ? "▼" : "▲";
+            th.appendChild(s);
+          }
+        });
+      }
+
+      function rowHtml(r, isUnscored) {
+        var band = bandOf(r.gav_label);
+        var reason = reasonText(r);
+        var srcLbl = growthSrcLabel(r);
+        var meta = fmtPrice(r.price) + " · " + fmtCap(r.market_cap) + " · " + fmtGrowth(r.ttm_revenue_growth_pct) + " growth" + (srcLbl ? " (" + srcLbl + ")" : "") + " · DCF " + fmtDCF(r.dcf) + ((r.sector || r.sub_sector) ? " · " + esc(r.sector || "—") + " · " + esc(r.sub_sector || "—") : "");
+        var h = '<tr' + (isUnscored ? ' class="unscored"' : "") + ">";
+        h += '<td class="ticker-cell"><span class="ticker">' + r.ticker + '</span><span class="tmeta">' + meta + "</span>";
+        if (isUnscored && reason) h += '<span class="reason">' + reason + "</span>";
+        h += "</td>";
+        h += '<td class="col-price">' + fmtPrice(r.price) + "</td>";
+        h += '<td class="col-cap">' + fmtCap(r.market_cap) + "</td>";
+        if (r.ttm_revenue_growth_pct === null || r.ttm_revenue_growth_pct === undefined) {
+          h += '<td class="col-growth missing">—</td>';
+        } else {
+          var fb = r.fallback || r.gav_code_source === "yfinance_annual_fallback";
+          h += '<td class="col-growth growth" style="' + (isUnscored ? "" : growthStyle(r.ttm_revenue_growth_pct)) + '">' + fmtGrowth(r.ttm_revenue_growth_pct) +
+            (srcLbl ? '<span class="gsrc' + (fb ? " fallback" : "") + '">' + srcLbl + "</span>" : "") + "</td>";
+        }
+        if (r.dcf === null || r.dcf === undefined) {
+          h += '<td class="col-dcf missing">n/m</td>';
+        } else {
+          h += '<td class="col-dcf">' + fmtDCF(r.dcf) + "</td>";
+        }
+        h += scoreCell(r.business, "Business", isUnscored);
+        h += scoreCell(r.value, "Value", isUnscored);
+        h += scoreCell(r.gav_code, "GAV", isUnscored, band);
+        if (isUnscored) {
+          h += '<td class="score final-score" data-label="Status">Unscored' + (reason ? '<span class="band">' + reason + "</span>" : "") + "</td>";
+        } else {
+          h += '<td class="score final-score" data-label="Final" style="' + heat(r.final_code) + '">' + fmtScore(r.final_code) + "</td>";
+        }
+        h += '<td class="col-sector">' + esc(r.sector || "—") + "</td>";
+        h += '<td class="col-subsector">' + esc(r.sub_sector || "—") + "</td>";
+        h += "</tr>";
+        return h;
+      }
+      function scoreCell(v, label, isUnscored, band) {
+        var cls = "score" + (v === null || v === undefined ? " missing" : "");
+        var style = (!isUnscored && v !== null && v !== undefined) ? ' style="' + heat(v) + '"' : "";
+        var inner = fmtScore(v);
+        if (band) inner += '<span class="band">' + band + "</span>";
+        return '<td class="' + cls + '" data-label="' + label + '"' + style + ">" + inner + "</td>";
+      }
+
+      /* run selector — populated from the runs array; future runs are just new entries */
+      (function initRunSelect() {
+        var sel = document.getElementById("runSelect");
+        if (!sel) return;
+        sel.innerHTML = "";
+        RUNS.forEach(function (run, i) {
+          var opt = document.createElement("option");
+          opt.value = String(i);
+          opt.textContent = run.label || run.run_id || ("Run " + (i + 1));
+          sel.appendChild(opt);
+        });
+        sel.value = String(state.runIndex);
+        sel.addEventListener("change", function (e) {
+          var idx = parseInt(e.target.value, 10);
+          if (!isNaN(idx) && RUNS[idx]) state.runIndex = idx;
+          state.key = "final"; state.dir = -1;
+          renderAll();
+        });
+      })();
+
+      document.querySelectorAll("thead th").forEach(function (th) {
+        th.addEventListener("click", function () {
+          var key = th.getAttribute("data-key");
+          if (state.key === key) { state.dir *= -1; }
+          else { state.key = key; state.dir = (key === "ticker" || key === "sector" || key === "sub_sector") ? 1 : -1; }
+          render();
+        });
+      });
+      document.getElementById("filter").addEventListener("input", function (e) {
+        state.q = e.target.value;
+        render();
+      });
+      if (window.matchMedia) {
+        var mq = window.matchMedia("(prefers-color-scheme: dark)");
+        if (mq.addEventListener) mq.addEventListener("change", function (e) { dark = e.matches; renderAll(); });
+      }
+      renderAll();
+    </script>
+  </body>
+</html>
