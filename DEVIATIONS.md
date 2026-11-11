@@ -404,3 +404,47 @@ delivers the report in chat, and marks them delivered. Tests 18 -> 20
 (place_single filled/unfilled). Today's pilot artifact was written
 retroactively through close_out_fill (deliver_after 2026-11-11
 13:05 PT). Not yet pushed.
+
+### D-27 — Scanner: adaptive price-band splitting past the 200-row limit (2026-11-11)
+Bug: run 20261111T200014Z failed at Phase 3 — the single scanner
+query (price < $12.62) matched 231 instruments, but run_scan returns
+at most 200 rows (its schema: total_items "may exceed len(results)
+when the scan's frontend_limit is hit") and run_scan accepts ONLY a
+scan_id (no pagination). The old code required rows == total_items
+and failed closed after 3 attempts. At wider caps the universe was
+smaller (184 at $40) and slipped under the wall. Fix
+(scripts/csp_screening.py): run_single_scan now scans adaptive price
+bands — a truncated band splits at its geometric-mean price into
+disjoint sub-bands whose union is the band; rows == total_items is
+still enforced per band, and a band still truncated at min width
+$0.25 / depth 6 fails closed with the original error (never a silent
+partial universe). Merged rows flow into the unchanged universe
+validation (duplicates across bands would trip it). Tests:
+tests/test_scanner_d27.py — 231-row synthetic universe recovered
+across 5 bands, 50-row universe stays 1 band, dense band fails
+closed. D-17 tests still pass. Not yet pushed.
+
+### D-28 — Daily wheel report as a .md file in the Hermes "Today's Wheel" format (2026-11-11)
+At BIG SANDY's instruction (with a screenshot of the Hermes format):
+the daily fill-report dispatch now also writes
+outputs/daily-wheel/YYYY-MM-DD.md on any day with fills, in the
+"Today's Wheel" format — per-position open blocks (Sell qty @ price,
+net premium, new collateral, contracts open) and Profit-taken close
+blocks (BTC qty @ price, original premium, closing debit, realized /
+net profit, collateral released), each with a grades line, then the
+day summary and a YTD Wheel section. Adaptations from the Hermes
+original: grades are the code engine's Value / Business scores with a
+letter band (A+ ≥90 … D+ 45–49.9, F <40), not model-scorer grades;
+the file covers ALL of the day's broker fills (manual closes create
+no fill-report artifact, so the dispatch now also checks the day's
+filled orders when no artifact is pending); the YTD ledger is
+reconstructed from the full broker order history — verified: it
+reproduces Hermes' Nov 5 totals exactly (+$2,378 realized, $3,958
+net premiums before Nov 11 activity). YTD % basis redefined
+transparently (Hermes' denominators were not recoverable): realized ÷
+collateral committed on closed positions; net premiums ÷ total
+collateral ever committed. First exemplar written for 2026-11-11
+(SMCI + ANGX opens, FIGR $20P profit taken; YTD 8/8 wins, realized
++$2,578, net premiums $4,089). Implemented as an instruction update
+to the standing wheel-fill-report-dispatch cron (no code change);
+not yet pushed.

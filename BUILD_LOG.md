@@ -436,3 +436,28 @@
 - Wrote today's pilot fill-report artifact via close_out_fill
   (pending, deliver_after 13:05 PT today); replaced the ad-hoc
   one-shot cron with the standing daily 13:05 PT dispatch cron.
+
+## Session 17 — 2026-11-11 (D-27: scanner banding)
+
+- Diagnosed the 12:00 PM run's Phase 3 failure (231 vs 200-row
+  frontend limit; run_scan has no pagination params — schema-checked).
+- Built adaptive price-band splitting in run_single_scan with
+  per-band fail-closed equality; tests/test_scanner_d27.py green;
+  D-17 suite still green. Rerun launched same day with the new
+  5-minute progress rule armed.
+
+## Session 18 — 2026-11-11 (D-28: daily wheel .md)
+
+- BIG SANDY supplied the Hermes "Today's Wheel" screenshot format
+  and directed that the report create a .md file in that format.
+- Reconstructed the full account ledger from get_option_orders
+  (34 orders, Jul 28 – Nov 11): 11 contracts, 8 closed (all wins),
+  3 open, 0 assignments; cross-checked against the screenshot's
+  Nov 5 figures (realized +$2,378, net premiums $3,958) — exact.
+- Wrote outputs/daily-wheel/2026-11-11.md (SMCI/ANGX opens, FIGR
+  $20P close, day summary, YTD: realized +$2,578, net premiums
+  $4,089) with code-engine grades (SMCI B-/C, ANGX A-/C, FIGR D+/C+).
+- Updated the wheel-fill-report-dispatch cron body: .md generation
+  on any day with fills (incl. artifact-less manual-close days),
+  format spec + grade bands + YTD basis embedded; next run Nov 12
+  13:05 PT verified.

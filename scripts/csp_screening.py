@@ -469,39 +469,44 @@ def compute_quarterly_qoq(facts: dict) -> Tuple[Optional[float], str]:
     return g, "PASS"
 
 # ==================== SCANNER ====================
-def run_single_scan() -> Tuple[Dict[str, dict], dict]:
-    """Run one synchronous filtered scan and extract its rows.
+SCAN_FRONTEND_LIMIT = 200  # run_scan returns at most this many rows per call
+SCAN_BAND_MAX_DEPTH = 6    # D-27: adaptive price-band splits (<= 64 leaf scans)
+SCAN_BAND_MIN_WIDTH_USD = 0.25
 
-    The complete create+run operation is retried at most two times after the
-    initial attempt. A third failure is raised so the workflow cannot continue
-    with a partial scanner universe.
-    """
-    print(f"  Running single scanner query (price < ${MAX_UNDERLYING_PRICE_USD:.2f})...", flush=True)
-    filters = [
+
+def _scan_filters(price_lo: float, price_hi: float) -> list:
+    return [
         {"filter_type": "FILTER_TYPE_INSTRUMENT_TYPE", "predicate": "=", "values": ["STOCK"]},
         {"filter_type": "FILTER_TYPE_AVERAGE_VOLUME", "interval": "1d", "length": 30, "predicate": ">", "values": [str(MIN_AVERAGE_VOLUME_SHARES)]},
         {"filter_type": "FILTER_TYPE_MARKET_CAP", "predicate": "BETWEEN", "values": [str(int(MIN_MARKET_CAP_USD)), str(int(MAX_MARKET_CAP_USD))]},
         {"filter_type": "FILTER_TYPE_IMPLIED_VOLATILITY", "predicate": "BETWEEN", "values": [str(MIN_ATM_PUT_IV), str(MAX_ATM_PUT_IV)]},
-        {"filter_type": "FILTER_TYPE_LAST", "predicate": ">=", "values": ["0.01"]},
-        {"filter_type": "FILTER_TYPE_LAST", "predicate": "<", "values": [str(MAX_UNDERLYING_PRICE_USD)]},
+        {"filter_type": "FILTER_TYPE_LAST", "predicate": ">=", "values": [f"{price_lo:.2f}"]},
+        {"filter_type": "FILTER_TYPE_LAST", "predicate": "<", "values": [f"{price_hi:.2f}"]},
         {"filter_type": "FILTER_TYPE_RSI", "interval": "1d", "length": 14, "predicate": "<", "values": [str(CSP_MAX_RSI)]},
     ]
 
+
+def _run_scan_once(price_lo: float, price_hi: float):
+    """One create+run for a single price band, with the standard retries.
+
+    Returns (rows, total_items_or_None, scan_id, raw_result). A band is
+    complete only when total_items is None or equals len(rows); the
+    caller (D-27 banding) decides whether a truncated band splits or
+    fails closed.
+    """
+    filters = _scan_filters(price_lo, price_hi)
     last_error = None
     for attempt in range(1, SCAN_MAX_ATTEMPTS + 1):
         try:
             create_result = mcp__robinhood_trading__create_scan(
                 filters=filters,
-                title=f"CSP Single Scan <${MAX_UNDERLYING_PRICE_USD:.2f}",
+                title=f"CSP Scan ${price_lo:.2f}-${price_hi:.2f}",
             )
             create_data = parse_mcp_payload(create_result, "create_scan")
             create_scan_result = create_data.get("result")
             if not isinstance(create_scan_result, dict) or not create_scan_result.get("scan_id"):
                 raise RuntimeError("create_scan returned no scan_id")
             scan_id = create_scan_result["scan_id"]
-
-            # run_scan is synchronous: do not start extraction until its result
-            # has returned.
             run_result = mcp__robinhood_trading__run_scan(scan_id=scan_id)
             run_data = parse_mcp_payload(run_result, "run_scan")
             scan_result = run_data.get("result")
@@ -516,17 +521,12 @@ def run_single_scan() -> Tuple[Dict[str, dict], dict]:
                     total_items = int(total_items)
                 except (TypeError, ValueError) as exc:
                     raise RuntimeError("run_scan total_items is not an integer") from exc
-                if total_items != len(rows):
-                    raise RuntimeError(
-                        f"run_scan returned {len(rows)} rows but reported {total_items} total_items"
-                    )
-            print(f"  Single scanner query complete: {len(rows)} rows", flush=True)
-            break
+            return rows, total_items, scan_id, scan_result
         except Exception as exc:
             last_error = exc
             if attempt == SCAN_MAX_ATTEMPTS:
                 raise RuntimeError(
-                    f"Single scanner query failed after {SCAN_MAX_ATTEMPTS} attempts"
+                    f"Scanner query failed after {SCAN_MAX_ATTEMPTS} attempts"
                 ) from exc
             print(
                 f"  Scanner attempt {attempt}/{SCAN_MAX_ATTEMPTS} failed; "
@@ -534,8 +534,68 @@ def run_single_scan() -> Tuple[Dict[str, dict], dict]:
                 flush=True,
             )
             time.sleep(SCAN_RETRY_DELAY_SECONDS)
-    else:  # pragma: no cover - loop either breaks or raises
-        raise RuntimeError("Single scanner query failed") from last_error
+    raise RuntimeError("Scanner query failed") from last_error  # pragma: no cover
+
+
+def _scan_band(price_lo: float, price_hi: float, depth: int, leaf_ids: list):
+    """Rows for one price band, splitting adaptively when truncated (D-27).
+
+    run_scan has no pagination and caps results at the frontend limit
+    (total_items may exceed len(results)); a truncated band is split at
+    its geometric-mean price and the halves are scanned as disjoint
+    sub-bands whose union is exactly this band. A band that is still
+    truncated at the minimum width / maximum depth fails closed with
+    the original mismatch error - the universe is never silently
+    partial.
+    """
+    rows, total_items, scan_id, _raw = _run_scan_once(price_lo, price_hi)
+    leaf_ids.append(scan_id)
+    if total_items is None or total_items == len(rows):
+        return rows
+    if total_items < len(rows):
+        raise RuntimeError(
+            f"run_scan returned {len(rows)} rows but reported {total_items} total_items"
+        )
+    if depth >= SCAN_BAND_MAX_DEPTH or (price_hi - price_lo) < SCAN_BAND_MIN_WIDTH_USD:
+        raise RuntimeError(
+            f"run_scan returned {len(rows)} rows but reported {total_items} total_items"
+        )
+    mid = round(math.sqrt(price_lo * price_hi), 2)
+    if not (price_lo < mid < price_hi):
+        mid = round((price_lo + price_hi) / 2, 2)
+    if not (price_lo < mid < price_hi):
+        raise RuntimeError(
+            f"run_scan returned {len(rows)} rows but reported {total_items} total_items"
+        )
+    print(
+        f"  Band ${price_lo:.2f}-${price_hi:.2f} truncated "
+        f"({len(rows)}/{total_items}); splitting at ${mid:.2f} (D-27)",
+        flush=True,
+    )
+    return (
+        _scan_band(price_lo, mid, depth + 1, leaf_ids)
+        + _scan_band(mid, price_hi, depth + 1, leaf_ids)
+    )
+
+
+def run_single_scan() -> Tuple[Dict[str, dict], dict]:
+    """Run the filtered scan over the full price range and extract its rows.
+
+    D-27: the universe can exceed run_scan's 200-row frontend limit
+    (231 rows at a $12.62 cap on 2026-11-11); the scan runs as adaptive
+    price bands (see _scan_band) so the merged universe is complete,
+    with the rows == total_items check enforced per band.
+    """
+    print(f"  Running scanner (price < ${MAX_UNDERLYING_PRICE_USD:.2f})...", flush=True)
+    leaf_ids: list = []
+    rows = _scan_band(0.01, float(MAX_UNDERLYING_PRICE_USD), 0, leaf_ids)
+    print(
+        f"  Scanner complete: {len(rows)} rows across {len(leaf_ids)} band(s)",
+        flush=True,
+    )
+    filters = _scan_filters(0.01, float(MAX_UNDERLYING_PRICE_USD))
+    scan_id = leaf_ids[0] if len(leaf_ids) == 1 else ",".join(leaf_ids)
+    scan_result = {"scan_id": scan_id, "total_items": len(rows), "d27_bands": len(leaf_ids)}
 
     universe = {}
     for row_number, item in enumerate(rows, start=1):
