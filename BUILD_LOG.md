@@ -299,3 +299,28 @@
   POP 0.634, OI 6,103) ranked #2; INOD/ADEA/NUVB no contract passed.
   First end-to-end Phase 6/7 completion. Phase 8 (covered calls)
   and a true market-hours full run remain for the Nov 10 cron.
+
+## Session 9 (2026-11-11) — D-20 CSP buying-power gate + first market-hours run
+
+- First true market-hours full run (20261111T163640Z-09a63f6b, 2m01s):
+  P1 PASS (BP $206.25), P2 PASS (both FIGR shorts CALCULATE), scanner
+  19 -> 2 (EOSE, GERN), Phase 5 GERN 37.3 / EOSE 33.2, Phase 6 strict
+  + fallback 0 qualified (0 moneyness-eligible of 38 raw), Phase 7 no
+  recommendation. Phase 8 FAILED the run: the Robinhood MCP errors on
+  get_option_instruments queried by `ids` (by chain_symbol works;
+  direct call + standalone Phase 8 retry both reproduced it), and
+  covered_calls' D-07 pre-check resolves positions by ids. Agentic
+  account holds 0 equity positions, so no covered call was possible
+  regardless. Phase 8 ids-lookup patch proposed to BIG SANDY, not yet
+  approved at time of writing.
+- D-20 applied at BIG SANDY's request ("not to run P3 when BP is less
+  than 700"): orchestrator-level gate in full_wheel.py — see
+  DEVIATIONS.md. Verified live the same morning (see the verification
+  run appended below).
+- D-20 verification run `20261111T164314Z-95b94504` (17s total, vs
+  2m01s for the ungated run an hour earlier): P1 PASS (BP $206.25),
+  P2 PASS, **03_07_csp_screening status "skipped"** with reason
+  `buying_power_below_csp_minimum` (BP $206.25 < $700) recorded in the
+  manifest, and the run proceeded to Phase 8 — which failed on the
+  same known get_option_instruments-by-ids MCP error (the only
+  failure in the run; the gate itself verified clean).

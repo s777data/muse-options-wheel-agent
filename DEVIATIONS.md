@@ -173,3 +173,20 @@ here. Nothing else differs intentionally.
   `result.fallback = gav_growth_yfinance_annual`; rows carry
   `gav_code_source` and `fallback`. Implemented and unit-verified;
   did not fire on the current cohort (no stragglers remained).
+- **D-20 (CSP buying-power gate, 2026-11-11, BIG SANDY's rule):**
+  the orchestrator (`scripts/full_wheel.py`) does not run the CSP
+  screening block (Phases 3-7, `run_csp_screening`) when effective
+  buying power is below $700 — below that, no realistic cash-secured
+  put can be funded and the scan/gates/valuation/chain work is wasted.
+  Effective buying power = the Phase 1 artifact's unleveraged buying
+  power, or, when the D-16 dry-run scan-cap override is set, the
+  override-implied premise (cap x 100), so $40-cap rehearsals still
+  run the block. The skip is a manifest entry with status "skipped"
+  and reason `buying_power_below_csp_minimum` (with the BP numbers),
+  never a silent omission and never a failure. Phases 1, 2 and 8 are
+  unaffected — they manage existing positions, not new exposure.
+  Threshold is a config value: module constant
+  `MIN_CSP_BUYING_POWER_USD`, env-overridable via
+  `WHEEL_MIN_CSP_BUYING_POWER_USD` (default 700). First live
+  verification 2026-11-11: BP $206.25 -> block skipped in <1s, run
+  proceeded to Phase 8.

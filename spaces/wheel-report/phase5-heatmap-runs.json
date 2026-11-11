@@ -1249,6 +1249,55 @@
      "sub_sector": "Information Technology Services"
     }
    ]
+  },
+  {
+   "folder": "20261111T163643Z",
+   "run_id": "20261111T163640Z-09a63f6b",
+   "label": "Nov 11, 2026 \u00b7 8:36 AM PT \u2014 $2.06 cap (live account, market hours)",
+   "scan_cap_usd": 2.0625,
+   "cap_basis": "Live buying power $206.25 / 100",
+   "cohort": "Phase 4C technical passers (2)",
+   "methodology": "dashboard-v5.3+gav-code (D-18 engine fixes)",
+   "formula": "Final-Code = 0.5*Business + 0.25*Value + 0.25*GAV-Code (all 0-100, code-only)",
+   "scores_note": "Scores are this run's own live Phase 5 rows (not regenerated). Phase 6/7: no qualifying CSP (0 moneyness-eligible instruments). Phase 8 failed on the Robinhood MCP get_option_instruments ids lookup; account holds 0 equity positions.",
+   "rows": [
+    {
+     "ticker": "GERN",
+     "price": 1.0076,
+     "market_cap": 623816487.0,
+     "status": "ok",
+     "failure_reason": null,
+     "business": 20.5,
+     "value": 50.6,
+     "gav_code": 57.8,
+     "gav_label": "\u2696\ufe0f\ud83e\ude99 Fair \u2014 balanced growth, a coin\u2019s worth of value",
+     "ttm_revenue_growth_pct": null,
+     "gav_code_source": "ttm_bridge",
+     "fallback": null,
+     "dcf": null,
+     "final_code": 37.3,
+     "sector": "Health Technology",
+     "sub_sector": null
+    },
+    {
+     "ticker": "EOSE",
+     "price": 1.98,
+     "market_cap": 637473358.0,
+     "status": "ok",
+     "failure_reason": null,
+     "business": 16.7,
+     "value": 34.6,
+     "gav_code": 64.8,
+     "gav_label": "\u2696\ufe0f\ud83e\ude99 Fair \u2014 balanced growth, a coin\u2019s worth of value",
+     "ttm_revenue_growth_pct": null,
+     "gav_code_source": "ttm_bridge",
+     "fallback": null,
+     "dcf": null,
+     "final_code": 33.2,
+     "sector": "Producer Manufacturing",
+     "sub_sector": null
+    }
+   ]
   }
  ]
 }

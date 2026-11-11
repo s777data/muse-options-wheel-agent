@@ -19,16 +19,33 @@ per PRD §11 gaps 1/3/10 this scaffold's structure governs —
   - the Phase 1 manifest entry stores only the artifact payload (masked
     account), never the runtime context with the full account number
     (D-11 artifact hygiene).
+  - D-20 (2026-11-11, BIG SANDY's rule): the CSP screening block
+    (Phases 3-7) does not run when effective buying power is below
+    $700 — at that level no realistic cash-secured put can be funded,
+    so the scan/gates/valuation/chain work is wasted. Effective buying
+    power is the Phase 1 unleveraged buying power, or, when the D-16
+    dry-run scan-cap override is set, the override-implied premise
+    (cap x 100) so $40-cap rehearsals still run. The skip is recorded
+    in the manifest (status "skipped", reason
+    "buying_power_below_csp_minimum"); Phases 1, 2 and 8 still run —
+    they manage existing positions, not new exposure. The threshold is
+    a config value (env WHEEL_MIN_CSP_BUYING_POWER_USD, default 700),
+    never hard-coded at the call site.
 """
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
 WORKFLOW_VERSION = "1.0.0"
+# D-20: minimum effective buying power (USD) for the CSP screening
+# block (Phases 3-7) to run at all. Config value, env-overridable.
+MIN_CSP_BUYING_POWER_USD = float(
+    os.environ.get("WHEEL_MIN_CSP_BUYING_POWER_USD", "700"))
 _ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = _ROOT / "outputs" / "robinhood-wheel-agent" / "runs"
 STATE_PATH = _ROOT / "outputs" / ".notification_state.json"
@@ -121,8 +138,29 @@ def run_full_wheel(force_rerun: bool = False) -> dict:
         phases.append(("03_07_csp_screening", csp_screening.run_csp_screening))
         # Phase 8 covered calls
         phases.append(("08_covered_calls", covered_calls.run_covered_call_evaluation))
+        account_artifact: dict = {}
         for name, fn in phases:
             started = _now()
+            if name == "03_07_csp_screening":
+                # D-20 gate: skip new-exposure screening when effective
+                # buying power cannot fund a realistic cash-secured put.
+                bp = account_artifact.get("unleveraged_buying_power_usd")
+                override = account_artifact.get("scan_cap_override_usd")
+                effective_bp = (float(override) * 100.0
+                                if override is not None else bp)
+                if effective_bp is not None \
+                        and float(effective_bp) < MIN_CSP_BUYING_POWER_USD:
+                    manifest["phases"].append({
+                        "phase": name, "started_at": started,
+                        "finished_at": _now(), "status": "skipped",
+                        "result": {
+                            "reason": "buying_power_below_csp_minimum",
+                            "buying_power_usd": bp,
+                            "effective_buying_power_usd": effective_bp,
+                            "min_required_usd": MIN_CSP_BUYING_POWER_USD,
+                            "rule": "D-20",
+                        }})
+                    continue
             result = fn()
             entry = {"phase": name, "started_at": started,
                      "finished_at": _now(), "status": "ok"}
@@ -130,6 +168,8 @@ def run_full_wheel(force_rerun: bool = False) -> dict:
                 # D-11: manifest keeps only the masked artifact payload;
                 # the runtime context carries the full account number.
                 result = result[1]
+            if name == "01_account_snapshot" and isinstance(result, dict):
+                account_artifact = result
             entry["result"] = result
             if isinstance(result, dict) and result.get("telegram_message"):
                 entry["telegram"] = send_telegram(
