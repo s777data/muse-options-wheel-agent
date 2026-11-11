@@ -190,3 +190,51 @@ here. Nothing else differs intentionally.
   `WHEEL_MIN_CSP_BUYING_POWER_USD` (default 700). First live
   verification 2026-11-11: BP $206.25 -> block skipped in <1s, run
   proceeded to Phase 8.
+- **D-21 (Phase 2 profit-taking made decision-grade, 2026-11-11,
+  BIG SANDY's instruction — "that's a bug, fix it"):**
+  `scripts/profit_taking.py` no longer emits the placeholder
+  `CALCULATE` signal. Changes, all in that file: (1) two new transport
+  bindings (`get_option_instruments`, `get_equity_quotes`); (2) a
+  `_resolve_option_instrument()` helper that resolves a position's
+  strike and put/call type by chain_id + expiration_dates + type
+  (the Phase 6 call shape, paginated, matching on option_id) —
+  positions carry expiration/opened_at but no strike, and the MCP
+  errors on instruments-by-ids; (3) the main loop now computes the
+  real sqrt-boundary signal via the source's own
+  `profit_taking_signal()`: days from the position's `opened_at` to
+  its expiration, underlying from a live equity quote; (4) units fix —
+  `average_price` is signed per-contract dollars (e.g. -396.6667 ==
+  $3.9667/share), so premium/share = abs(average_price) /
+  trade_value_multiplier and unrealized P&L uses the per-share
+  premium (the source's raw arithmetic produced nonsense like
+  -$121,565). Signal rows and the telegram message now carry strike,
+  underlying, trigger, boundary, and day counts; a position whose
+  instrument cannot be resolved stays `CALCULATE` with an explicit
+  `signal_error` (fail-closed per position). Verified live
+  2026-11-11: FIGR Dec 18 $20P x2 -> TAKE (premium $1.95, mid $1.00,
+  P&L +$190, trigger $19.27 vs underlying $24.10, day 6/43); FIGR
+  Nov 20 $32.50P x3 -> HOLD (premium $3.97, mid $8.55, P&L -$1,375,
+  trigger $28.86, day 48/57). Note: the same chain-based resolution
+  is the technique the pending Phase 8 fix needs.
+- **D-22 (Phase 2 signal aligned to the profit-taking-decider skill
+  spec, 2026-11-11, BIG SANDY caught the discrepancy):** the copied
+  `profit_taking_signal()` claimed "per skill spec" but implemented an
+  underlying-price trigger (TAKE when the underlying crosses
+  strike -/+ premium x sqrt(elapsed/total)) and never computed profit
+  percent — so it emitted TAKE for the FIGR Dec 18 $20P at only 48.7%
+  captured. The skill spec is explicit and strict: TAKE only when
+  `profit_percent > 50.00` (fixed minimum premium-capture gate, "not
+  permitted below this value") AND `profit_percent >
+  100 * sqrt(elapsed_fraction)`; equality at either boundary is HOLD.
+  D-22 rewrites the signal to the spec: the caller now passes the
+  current mark, profit percent is computed from premium vs mark, both
+  strict gates are applied, and the result/rows/telegram carry
+  `profit_percent`, `required_profit_percent` and
+  `min_profit_capture_percent`. `boundary`/`trigger_price` are kept as
+  informational fields only and no longer drive the signal. Unit
+  checks: live Dec 18 numbers (48.72% vs 37.35% required) -> HOLD;
+  mark $0.97 (50.26%) -> TAKE; exactly 50.00% -> HOLD; 60% captured
+  but 96.45% required late in life -> HOLD; missing mark -> HOLD with
+  error. Supersedes the signal semantics D-21 verified (D-21's data
+  plumbing — chain-resolved strike/type, real dates, unit fixes — is
+  unchanged and still correct).

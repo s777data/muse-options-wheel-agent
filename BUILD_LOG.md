@@ -324,3 +324,32 @@
   manifest, and the run proceeded to Phase 8 — which failed on the
   same known get_option_instruments-by-ids MCP error (the only
   failure in the run; the gate itself verified clean).
+
+## Session 10 (2026-11-11) — D-21 Phase 2 profit-taking fix
+
+- BIG SANDY, on the voice call: the Phase 2 `CALCULATE` placeholder
+  "is a bug, fix it." D-21 applied (see DEVIATIONS.md): chain-based
+  instrument resolution, real sqrt-boundary signals, premium/P&L
+  units fix. Standalone live run: both FIGR positions now produce
+  real signals — Dec 18 $20P TAKE, Nov 20 $32.50P HOLD — matching
+  hand-computed boundaries ($0.73 / $3.64) exactly. Phase 2 runtime
+  ~11s (instrument-resolution calls) vs ~6s for the placeholder.
+- D-21 in-pipeline verification run `20261111T165352Z-cc15479a`:
+  Phase 2 manifest signals are FIGR $20P TAKE / FIGR $32.50P HOLD;
+  Phase 3 skipped per D-20; the run's only failure remains Phase 8
+  (known by-ids MCP error, patch still pending BIG SANDY's go).
+
+## Session 11 (2026-11-11) — D-22 Phase 2 signal aligned to skill spec
+
+- BIG SANDY: "Isn't it 50% min in code for TAKE..why at 49%?" — he was
+  right. The 50.00% minimum premium-capture gate lives in the
+  profit-taking-decider skill spec; the copied signal function never
+  implemented it (price-trigger variant instead). D-22 applied at his
+  instruction ("make sure this rule is on code"): see DEVIATIONS.md.
+  Six unit checks pass, including both strict-equality edges.
+- Live verification run appended below.
+- D-22 live verification (standalone Phase 2, 2026-11-11 ~09:31 PT):
+  FIGR Dec 18 $20P x2 -> HOLD (captured 48.72%, required 37.35%,
+  50% gate fails — the D-21 TAKE is corrected); FIGR Nov 20 $32.50P
+  x3 -> HOLD (captured -115.55%, required 91.77%). Both signals now
+  match the skill spec on live data.
