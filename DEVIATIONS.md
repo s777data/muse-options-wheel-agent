@@ -238,3 +238,48 @@ here. Nothing else differs intentionally.
   error. Supersedes the signal semantics D-21 verified (D-21's data
   plumbing — chain-resolved strike/type, real dates, unit fixes — is
   unchanged and still correct).
+
+### D-23 — Phase 8 (covered calls) live-shape repair, five fixes (2026-11-11)
+
+Audit at BIG SANDY's request found Phase 8 could never produce a real
+recommendation against the live MCP shapes. All five fixed in
+scripts/covered_calls.py; no criteria or thresholds changed.
+
+1. **Instrument type by `ids` (fatal).** `_instrument_type` used
+   `get_option_instruments(ids=[...])`, which the MCP rejects (JSON-RPC
+   error) — this failed every full run in the D-07 pre-check. Now
+   chain-scoped: `chain_symbol` + `expiration_dates`, matched on
+   instrument id locally (same technique as D-21), fail-closed raise on
+   an unresolvable type, per D-07's read-failure rule.
+2. **Chains shape.** Live chains arrive under `data.chains`, each with
+   an `expiration_dates` list and `trade_value_multiplier` as the string
+   `"100.0000"`. Code expected `data.results`, a single
+   `expiration_date`, and int `100`. Now reads `data.chains`, iterates
+   the expiration list with the 30–45 DTE filter per date, and compares
+   the multiplier as a float.
+3. **Tax lots shape.** Live lots arrive under `data.tax_lots`; code read
+   `data.results` OUTSIDE the per-symbol try, so any account holding
+   >=100 shares would have crashed the phase. Now reads `data.tax_lots`
+   (falling back to `_payload_results`), with string-safe quantity/cost
+   coercion and a total-`cost_basis` fallback.
+4. **Quote nesting.** Live quotes nest under `"quote"` (D-14 shape);
+   code read flat `bid_price`/`ask_price` -> zeros -> the `bid > 0` gate
+   rejected every contract. Now unwraps `row["quote"]` before reading
+   bid/ask/delta, with a guarded delta coercion.
+5. **Dead RSI gate.** `timedelta` was never imported and the indicators
+   call passed `symbol=` where the MCP takes `symbols=[...]`; both
+   errors were swallowed by a bare `except` defaulting `rsi_ok=True`, so
+   RSI < 70 never filtered anything. Import fixed, call fixed
+   (`symbols=[symbol]`, UTC start), tolerant series parse, and failures
+   now print a warning while keeping the source's fail-open default.
+
+Also: equity `quantity` and `current_price` get the same string/None
+coercion hardening as D-13/D-21.
+
+Verified live 2026-11-11: `_committed_call_shares` returns {} (both
+FIGR short puts chain-resolved as puts and excluded); FIGR chain parses
+(multiplier 100.0, in-window expirations 2026-12-11/18/24, 24 call
+instruments, nested quote unwrapped with real bid/ask/delta); standalone
+Phase 8 completes clean (0 equity positions -> no recommendations);
+full run 20261111T173746Z-710fab6e is the first with failure: null —
+Phases 1/2/8 ok, 3–7 skipped under D-20.

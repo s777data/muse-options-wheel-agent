@@ -353,3 +353,16 @@
   50% gate fails — the D-21 TAKE is corrected); FIGR Nov 20 $32.50P
   x3 -> HOLD (captured -115.55%, required 91.77%). Both signals now
   match the skill spec on live data.
+
+## Session 12 — 2026-11-11 (Phase 8 repair, D-23)
+
+- BIG SANDY asked for a Phase 8 bug audit, then approved fixing all
+  five as one deviation ("Yeah, go ahead").
+- D-23 applied to scripts/covered_calls.py: chain-scoped instrument
+  type (no more `ids` lookups), data.chains + expiration_dates list +
+  string multiplier, data.tax_lots, nested-quote unwrap, live RSI gate
+  (timedelta import + symbols=[...]); quantity/price coercions hardened.
+- Live verification: committed-shares {} (FIGR puts excluded correctly);
+  FIGR chain/instruments/quote path exercised end-to-end; standalone
+  Phase 8 clean; full run 20261111T173746Z-710fab6e failure: null
+  (P1/P2/P8 ok, P3-7 D-20 skip) — first fully green pipeline run.

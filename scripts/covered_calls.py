@@ -7,7 +7,7 @@ Outputs: Covered call recommendations for eligible lots + Telegram delivery
 
 import sys
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -60,14 +60,29 @@ def _payload_results(payload: dict) -> list:
     return []
 
 
-def _instrument_type(option_id) -> Optional[str]:
-    """Resolve an option instrument's type ("call"/"put") by id."""
-    result = mcp__robinhood_trading__get_option_instruments(ids=[option_id])
+def _instrument_type(option_id, chain_symbol=None,
+                     expiration_date=None) -> Optional[str]:
+    """Resolve an option instrument's type ("call"/"put").
+
+    D-23: the MCP rejects get_option_instruments lookups by `ids`
+    (JSON-RPC error, both full runs + direct retry); resolve chain-scoped
+    by chain_symbol + expiration_date and match the instrument id locally
+    — the same technique D-21 applied in Phase 2. Fail-closed: an
+    unresolvable type raises, per D-07's read-failure rule.
+    """
+    if not chain_symbol:
+        raise ValueError(
+            f"cannot resolve option type for {option_id}: no chain_symbol")
+    kwargs = {"chain_symbol": chain_symbol}
+    if expiration_date:
+        kwargs["expiration_dates"] = expiration_date
+    result = mcp__robinhood_trading__get_option_instruments(**kwargs)
     rows = _payload_results(json.loads(result["result"]))
     for row in rows:
         if str(row.get("id") or row.get("option_id") or "") == str(option_id):
             return row.get("type")
-    return rows[0].get("type") if rows else None
+    raise ValueError(
+        f"instrument {option_id} not found in {chain_symbol} chain")
 
 
 def _committed_call_shares(account_number) -> Dict[str, float]:
@@ -92,7 +107,8 @@ def _committed_call_shares(account_number) -> Dict[str, float]:
             qty = 0.0
         if not option_id or not symbol or qty <= 0:
             continue
-        if _instrument_type(option_id) != "call":
+        if _instrument_type(option_id, chain_symbol=symbol,
+                            expiration_date=pos.get("expiration_date")) != "call":
             continue
         committed[symbol] = (committed.get(symbol, 0.0)
                              + qty * STANDARD_OPTION_CONTRACT_SHARES)
@@ -122,7 +138,9 @@ def _committed_call_shares(account_number) -> Dict[str, float]:
                 qty = 0.0
             if not option_id or not symbol or qty <= 0:
                 continue
-            if _instrument_type(option_id) != "call":
+            if _instrument_type(option_id, chain_symbol=symbol,
+                                expiration_date=(leg.get("expiration_date")
+                                                 or order.get("expiration_date"))) != "call":
                 continue
             committed[symbol] = (committed.get(symbol, 0.0)
                                  + qty * STANDARD_OPTION_CONTRACT_SHARES)
@@ -158,7 +176,10 @@ def run_covered_call_evaluation() -> dict:
     
     for pos in pos_data["data"]["results"]:
         symbol = pos.get("symbol")
-        quantity = float(pos.get("quantity", 0))
+        try:
+            quantity = float(pos.get("quantity") or 0)
+        except (TypeError, ValueError):
+            quantity = 0.0
         
         if quantity < STANDARD_OPTION_CONTRACT_SHARES:
             continue  # Need at least 100 shares per contract
@@ -173,12 +194,22 @@ def run_covered_call_evaluation() -> dict:
         lots_result = mcp__robinhood_trading__get_equity_tax_lots(account_number=agentic_account, symbol=symbol)
         lots_data = json.loads(lots_result["result"])
         
-        # Calculate weighted average cost basis
+        # Calculate weighted average cost basis.
+        # D-23: live tax lots arrive under data.tax_lots (verified), not
+        # data.results; per-share cost may be a total cost_basis instead.
         total_shares = 0
         total_cost = 0
-        for lot in lots_data["data"]["results"]:
-            qty = float(lot.get("quantity", 0))
-            cost = float(lot.get("cost_basis_per_share", 0))
+        lot_rows = (lots_data.get("data") or {}).get("tax_lots")
+        if not isinstance(lot_rows, list):
+            lot_rows = _payload_results(lots_data)
+        for lot in lot_rows:
+            try:
+                qty = float(lot.get("quantity") or 0)
+                cost = float(lot.get("cost_basis_per_share") or 0)
+                if cost <= 0 and lot.get("cost_basis"):
+                    cost = float(lot["cost_basis"]) / qty if qty > 0 else 0
+            except (TypeError, ValueError):
+                continue
             if qty > 0 and cost > 0:
                 total_shares += qty
                 total_cost += qty * cost
@@ -190,81 +221,115 @@ def run_covered_call_evaluation() -> dict:
             chains_result = mcp__robinhood_trading__get_option_chains(underlying_symbol=symbol)
             chains_data = json.loads(chains_result["result"])
             
-            for chain in chains_data["data"]["results"]:
+            # D-23: live chains arrive under data.chains, each carrying an
+            # expiration_dates LIST and trade_value_multiplier as the
+            # string "100.0000" (both verified live 2026-11-11).
+            chain_rows = (chains_data.get("data") or {}).get("chains")
+            if not isinstance(chain_rows, list):
+                chain_rows = _payload_results(chains_data)
+            for chain in chain_rows:
                 if not chain.get("can_open_position"): continue
-                if chain.get("trade_value_multiplier") != 100: continue
+                try:
+                    multiplier = float(chain.get("trade_value_multiplier") or 0)
+                except (TypeError, ValueError):
+                    continue
+                if multiplier != 100: continue
+
+                exp_dates = chain.get("expiration_dates") or []
+                if not exp_dates and chain.get("expiration_date"):
+                    exp_dates = [chain["expiration_date"]]
+                for exp_date in exp_dates:
+                    exp_dt = datetime.strptime(exp_date, "%Y-%m-%d").date()
+                    today = datetime.now().date()
+                    dte = (exp_dt - today).days
+                    if not (MIN_DTE <= dte <= MAX_DTE): continue
                 
-                exp_date = chain["expiration_date"]
-                exp_dt = datetime.strptime(exp_date, "%Y-%m-%d").date()
-                today = datetime.now().date()
-                dte = (exp_dt - today).days
-                if not (MIN_DTE <= dte <= MAX_DTE): continue
+                    # Get call options
+                    inst_result = mcp__robinhood_trading__get_option_instruments(
+                        chain_id=chain["id"], expiration_dates=exp_date, type="call"
+                    )
+                    inst_data = json.loads(inst_result["result"])
                 
-                # Get call options
-                inst_result = mcp__robinhood_trading__get_option_instruments(
-                    chain_id=chain["id"], expiration_dates=exp_date, type="call"
-                )
-                inst_data = json.loads(inst_result["result"])
-                
-                for opt in inst_data["data"]["results"]:
-                    if opt["state"] != "active": continue
-                    strike = float(opt["strike_price"])
-                    if strike <= avg_cost: continue  # Don't sell below cost basis
+                    for opt in _payload_results(inst_data):
+                        if opt.get("state") not in (None, "active"): continue
+                        strike = float(opt["strike_price"])
+                        if strike <= avg_cost: continue  # Don't sell below cost basis
                     
-                    option_id = opt["id"]
-                    quote_result = mcp__robinhood_trading__get_option_quotes(instrument_ids=[option_id])
-                    quote_data = json.loads(quote_result["result"])
+                        option_id = opt["id"]
+                        quote_result = mcp__robinhood_trading__get_option_quotes(instrument_ids=[option_id])
+                        quote_data = json.loads(quote_result["result"])
                     
-                    if not quote_data["data"]["results"]: continue
-                    q = quote_data["data"]["results"][0]
+                        quote_rows = _payload_results(quote_data)
+                        if not quote_rows: continue
+                        q = quote_rows[0]
+                        if isinstance(q, dict) and isinstance(q.get("quote"), dict):
+                            q = q["quote"]  # D-23: live quotes nest under "quote"
                     
-                    bid = float(q.get("bid_price", 0) or 0)
-                    ask = float(q.get("ask_price", 0) or 0)
-                    delta = float(q.get("delta", 0) or 0) if q.get("delta") else None
+                        bid = float(q.get("bid_price", 0) or 0)
+                        ask = float(q.get("ask_price", 0) or 0)
+                        try:
+                            delta = float(q.get("delta")) if q.get("delta") is not None else None
+                        except (TypeError, ValueError):
+                            delta = None
                     
-                    if bid > 0 and ask > 0 and delta:
-                        mid = (bid + ask) / 2
-                        spread = (ask - bid) / mid if mid > 0 else 1.0
-                        roc = (mid / strike) if strike > 0 else 0
+                        if bid > 0 and ask > 0 and delta:
+                            mid = (bid + ask) / 2
+                            spread = (ask - bid) / mid if mid > 0 else 1.0
+                            roc = (mid / strike) if strike > 0 else 0
                         
-                        if (MIN_DELTA <= delta <= MAX_DELTA and 
-                            spread <= MAX_BID_ASK_SPREAD and 
-                            roc >= MIN_ROC):
+                            if (MIN_DELTA <= delta <= MAX_DELTA and 
+                                spread <= MAX_BID_ASK_SPREAD and 
+                                roc >= MIN_ROC):
                             
-                            # Get technical check (RSI < 70, etc.)
-                            try:
-                                rsi_result = mcp__robinhood_trading__get_equity_technical_indicators(
-                                    symbol=symbol, type="rsi", period=14, interval="day",
-                                    start_time=(datetime.now() - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
-                                )
-                                rsi_data = json.loads(rsi_result["result"])
-                                rsi = rsi_data["data"]["indicators"][0]["series"][-1]["value"]
-                                rsi_ok = rsi < 70
-                            except:
-                                rsi_ok = True  # Default to ok if technical fails
+                                # Technical check (RSI < 70). D-23: timedelta
+                                # was never imported and the call used symbol=
+                                # where the MCP takes symbols=[...] — both errors
+                                # were swallowed by the bare except, so this gate
+                                # never filtered anything. Fixed call + tolerant
+                                # parse; the source's fail-open default stays.
+                                try:
+                                    rsi_result = mcp__robinhood_trading__get_equity_technical_indicators(
+                                        symbols=[symbol], type="rsi", period=14, interval="day",
+                                        start_time=(datetime.now(timezone.utc) - timedelta(days=60)).strftime("%Y-%m-%dT%H:%M:%SZ")
+                                    )
+                                    rsi_data = json.loads(rsi_result["result"])
+                                    rdata = rsi_data.get("data") or {}
+                                    indicators = rdata.get("indicators")
+                                    if indicators is None:
+                                        for row in (rdata.get("results") or []):
+                                            if isinstance(row, dict) and row.get("indicators"):
+                                                indicators = row["indicators"]
+                                                break
+                                    first = (indicators or [])[0]
+                                    series = first.get("data") or first.get("series") or []
+                                    rsi = float(series[-1]["value"])
+                                    rsi_ok = rsi < 70
+                                except Exception as rsi_err:
+                                    print(f"  RSI check unavailable for {symbol}: {rsi_err}", flush=True)
+                                    rsi_ok = True  # Source default: ok if technical fails
                             
-                            if rsi_ok:
-                                premium_total = mid * STANDARD_OPTION_CONTRACT_SHARES * contracts_available
-                                annualized_roc = roc * (365 / dte)
+                                if rsi_ok:
+                                    premium_total = mid * STANDARD_OPTION_CONTRACT_SHARES * contracts_available
+                                    annualized_roc = roc * (365 / dte)
                                 
-                                recommendations.append({
-                                    "symbol": symbol,
-                                    "contracts_available": contracts_available,
-                                    "shares_committed_to_short_calls": committed,
-                                    "avg_cost_basis": avg_cost,
-                                    "current_price": pos.get("last_price", 0),
-                                    "strike": strike,
-                                    "expiration": exp_date,
-                                    "dte": dte,
-                                    "delta": delta,
-                                    "premium_per_contract": mid,
-                                    "total_premium": premium_total,
-                                    "roc": roc,
-                                    "annualized_roc": annualized_roc,
-                                    "spread_pct": spread,
-                                    "call_away_price": strike,
-                                    "call_away_profit": (strike - avg_cost) * STANDARD_OPTION_CONTRACT_SHARES * contracts_available
-                                })
+                                    recommendations.append({
+                                        "symbol": symbol,
+                                        "contracts_available": contracts_available,
+                                        "shares_committed_to_short_calls": committed,
+                                        "avg_cost_basis": avg_cost,
+                                        "current_price": float(pos.get("last_price") or pos.get("average_buy_price") or 0),
+                                        "strike": strike,
+                                        "expiration": exp_date,
+                                        "dte": dte,
+                                        "delta": delta,
+                                        "premium_per_contract": mid,
+                                        "total_premium": premium_total,
+                                        "roc": roc,
+                                        "annualized_roc": annualized_roc,
+                                        "spread_pct": spread,
+                                        "call_away_price": strike,
+                                        "call_away_profit": (strike - avg_cost) * STANDARD_OPTION_CONTRACT_SHARES * contracts_available
+                                    })
         except Exception as e:
             print(f"  Warning: Covered call eval failed for {symbol}: {e}", flush=True)
     
