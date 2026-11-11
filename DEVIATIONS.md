@@ -448,3 +448,75 @@ collateral ever committed. First exemplar written for 2026-11-11
 +$2,578, net premiums $4,089). Implemented as an instruction update
 to the standing wheel-fill-report-dispatch cron (no code change);
 not yet pushed.
+
+D-28 addendum (2026-11-11, later): at BIG SANDY's direction ("Add
+the PNG to the daily dispatch too", then "this should be in code"),
+generation moved from dispatch-cron instructions into a repo script:
+scripts/daily_wheel_report.py (system python3 + Pillow; transport is
+stdlib-only) rebuilds the ledger from the full order history, writes
+the .md, and renders the .png from the .md (single source of truth).
+Tests: tests/test_daily_wheel_report.py, 7/7. The dispatch cron now
+just runs the script and attaches both files. Code verification
+against the hand-written inaugural file caught a hand-arithmetic
+error: ALHC's peak simultaneous short was 4 contracts, not 5 (a
+same-day buy-to-close interleaved with the sells), so the YTD bases
+are $34,050 (closed) / $48,000 (total) and the percentages 7.57% /
+8.52% — superseding the 7.41% / 8.39% and $34,800 / $48,750 figures
+in the original D-28 entry above and in the first hand-written file.
+Fills are now walked in true timestamp order (the API's same-day
+ordering is not chronological). Not yet pushed.
+
+### D-29 — Fill-report dispatch is scheduled per trade day, not standing daily (2026-11-11)
+At BIG SANDY's direction ("this dispatch should only run and
+scheduled the day trades are placed on wheel"), the standing daily
+13:05 PT cron `wheel-fill-report-dispatch` was removed. Replacement
+rule: exactly one one-shot dispatch per day on which wheel trades
+are placed, created at placement time in the same step as the
+placement (reviving the original D-26 placement-step rule that the
+standing cron had replaced). One-shot shape: id
+wheel-fill-report-YYYY-MM-DD-1305, runonce at that date 13:05 PT,
+owner goal options-wheel-agent-build, delivery to the Run-the-wheel
+chat; reuse the day's one-shot if more trades follow the same day.
+The dispatch body is preserved verbatim as a template at
+~/workspace/goals/options-wheel-agent-build/hidden_files/wheel-fill-report-dispatch-template.md.
+Days with no placements have no dispatch and no report. Manual
+trades BIG SANDY places himself in the app do not auto-schedule
+(nothing observes them); if he wants a report for a manual-trade
+day, he asks or places through the agent. Not yet pushed.
+
+### D-30 — The 13:05 dispatch is scheduled by code: the wheel-fill-report-due hook (2026-11-11)
+BIG SANDY asked whether the code schedules the 1:05 PM dispatch; it
+did not (schedule_fill_report writes the artifact and schedules
+nothing; repo Python has no route to Muse crons — no CLI exists
+and cron definition files are read-only projections). At his
+direction ("Build the hook — code schedules it"), the trigger is
+now a hook: ~/hooks/scripts/wheel-fill-report-due.sh polls
+.state/fill_reports/ every 300s, stays silent at no agent cost
+while nothing is due, and wakes the dispatch worker when a pending
+fill_report_request reaches its deliver_after. Per-artifact re-wake
+suppression (3h) in hook state prevents double-fires and retries a
+failed delivery once. The worker instruction (in the hook
+definition) is the D-26/D-28 dispatch: broker-verify each artifact,
+mark delivered, run scripts/daily_wheel_report.py, attach .md +
+.png, deliver to the Run-the-wheel chat. This supersedes D-29's
+agent-created one-shots (the standing daily cron was already
+removed under D-29). Verified: detector tested against a fixture
+directory (wake on the due artifact only; silent on re-poll;
+future/delivered ignored), registered dry run silent against live
+state, live run silent, hook enabled. Lifecycle docstrings updated
+(the artifact IS the schedule); lifecycle suite 20/20. Detector
+lives outside the repo under ~/hooks/scripts/ by platform design.
+Not yet pushed (repo files: this entry, BUILD_LOG Session 20,
+order_lifecycle.py docstrings).
+
+### D-31 — Code schedules the 13:05 dispatch itself: one-shot systemd timer created at fill time (2026-11-11, BIG SANDY directive; supersedes D-30)
+BIG SANDY rejected the D-30 polling hook outright ("remove the hook and figure out a way") and restated the requirement: when a CSP fills, the CODE should schedule the 1:05 PM dispatch. Built:
+- Hook `wheel-fill-report-due` REMOVED (definition archived by the platform; detector script and state file deleted). No polling remains anywhere in the design.
+- `schedule_fill_report()` (order lifecycle) still writes the fill-report artifact (now also carrying `account_number` and a `dispatch_timer` outcome record) and now ALSO calls `create_dispatch_timer(run_at, account)`: `systemd-run --on-calendar="<date> 13:05:00 America/Los_Angeles" --unit=wheel-fill-dispatch-<YYYYMMDD> --collect` running `scripts/fill_report_dispatch.py`. One timer per trade day (an existing loaded timer is reused); creation is best-effort — failures are recorded on the artifact, never raised, so scheduling can never break order close-out. Kill switch: `WHEEL_DISPATCH_TIMER=off`.
+- New `scripts/fill_report_dispatch.py` performs the whole dispatch in code at fire time: due-artifact scan, read-only broker verification per artifact (`get_option_orders`; reads BOTH envelope keys — the MCP shape carried rows under `data.results` in the morning and `data.orders` by the afternoon), day-report generation via `daily_wheel_report.py` subprocess, dispatch summary written to `outputs/daily-wheel/DATE-dispatch.md`, JSONL record in `.state/dispatch_log.jsonl`, artifacts marked delivered (`delivered_via: systemd_dispatch (D-31)`). A per-artifact verification exception is captured as a failure entry (artifact stays pending, exit code 2), never a crash.
+- Three environment facts the smoke tests established, all baked into `create_dispatch_timer`: (1) the system manager's HOME is /root and the Robinhood transport resolves its client from `Path.home()` — the unit carries `--setenv=HOME=<scheduling user's home>`; (2) the MCP endpoint is reachable only through the sandbox HTTP proxy, which services do not inherit — the proxy variables present at schedule time are passed through as `--setenv` (values never logged or written to the artifact); (3) credential brokering via authd (/run/hatch/auth/authd.sock) works fine from a service — session env vars (tokens, session ids) are NOT needed and are NOT baked in.
+- Verified end-to-end through the real production path (2026-11-11 15:19 PT): fixture artifact for the real SMCI fill + `create_dispatch_timer(+75s)` → timer fired on schedule → fill broker-verified (credit/open qty 1 @ $2.46) → day .md/.png regenerated byte-identical → dispatch file written → artifact marked delivered → timer collected itself (LoadState not-found after firing). Suites: lifecycle 20/20, dispatch 3/3, daily report 7/7.
+- Known limits, disclosed to BIG SANDY: (a) a transient systemd timer lives in the manager's runtime state — a VM replacement between fill and 13:05 loses the timer (the artifact stays pending; the next fill's timer or a manual dispatch run still covers the day); Muse crons are recovery-managed, OS timers are not. (b) The code dispatch writes the report files at 13:05; posting them into Muse chat still requires an agent turn — no local code path can post to the chat. Whether to pair the timer with an agent-created chat-delivery one-shot at placement time is BIG SANDY's open choice.
+
+### D-32 — Chat delivery paired at placement time (2026-11-11, BIG SANDY's choice)
+Offered the last-mile choice after D-31 (files-only vs chat one-shot), BIG SANDY chose: "Also create a chat-delivery one-shot at placement time." Standing rule, effective for every future agent-placed fill: in the same placement step, immediately after fill confirmation, the agent reads the artifact's `deliver_after` and creates — or reuses, if one exists for that date — a one-shot Muse cron `wheel-fill-report-YYYY-MM-DD-1305` (runonce at deliver_after, 13:05 PT, America/Los_Angeles, exact; owner goal:options-wheel-agent-build; delivery = Run-the-wheel chat). Its only job is to post the CODE-generated dispatch into chat (summary + DATE.md + DATE.png) — the D-31 systemd timer still does the verification and generation. If the code dispatch has not completed when the one-shot runs (e.g. a VM replacement lost the transient OS timer), the one-shot runs `scripts/fill_report_dispatch.py` itself as the fallback, then delivers. No code change: Muse crons can only be created by the agent (the platform boundary established in D-29/D-31); the pairing rule and the run instructions live in the goal's dispatch template (hidden_files/wheel-fill-report-dispatch-template.md), which the placement step follows. Nothing was scheduled today under D-32 — no placement is pending; the first use is the next confirmed fill.

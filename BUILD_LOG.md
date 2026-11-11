@@ -461,3 +461,55 @@
   on any day with fills (incl. artifact-less manual-close days),
   format spec + grade bands + YTD basis embedded; next run Nov 12
   13:05 PT verified.
+
+## Session 18 addendum — 2026-11-11 (D-28 code version)
+
+- BIG SANDY asked for a screenshot of the .md in the Hermes style;
+  rendered with PIL (bundled Chromium refuses direct CLI use), then
+  at his "this should be in code" the whole generator became
+  scripts/daily_wheel_report.py: orders -> ledger -> .md -> .png,
+  with tests/test_daily_wheel_report.py (7/7, system python3).
+- Regenerated 2026-11-11 files from code; diff vs the hand-written
+  file is only the footnote validation sentence (dropped by design)
+  and corrected YTD percentages (7.57% / 8.52%; ALHC peak short 4,
+  not 5 — see DEVIATIONS D-28 addendum).
+- Footnote font switched to DejaVu Sans (Noto Italic renders ≥ as
+  tofu here); verified visually.
+- Dispatch cron repointed: run the script, attach .md + .png, and
+  report script errors instead of hand-writing a substitute.
+
+## Session 19 — 2026-11-11 (D-29: per-trade-day dispatch)
+
+- BIG SANDY: the 1:05 PM dispatch "should only run and scheduled
+  the day trades are placed on wheel." Removed the standing daily
+  wheel-fill-report-dispatch cron (verified: disabled, no next run).
+- Saved the dispatch body as a one-shot template in the goal's
+  hidden_files; the scheduling rule (create at placement, same step,
+  one per day, reuse if present) is logged as D-29. Tomorrow
+  (Nov 12) has no dispatch unless trades are placed.
+
+## Session 20 — 2026-11-11 (D-30: hook-scheduled dispatch)
+
+- Answered BIG SANDY's "the code should schedule the 1:05 dispatch
+  — is that the case?" honestly: no; the lifecycle only writes the
+  artifact, and D-29's one-shots were agent-created. He chose the
+  hook build.
+- Built ~/hooks/scripts/wheel-fill-report-due.sh (300s poll of
+  .state/fill_reports/, wake on due pending artifacts, 3h per-
+  artifact re-wake suppression via hook state). Fixture-tested both
+  branches; registered as hook wheel-fill-report-due with the
+  dispatch as its worker instruction, delivery to this chat;
+  dry run + live run silent against current state; enabled.
+- order_lifecycle.py docstrings corrected (removed the stale
+  "standing dispatch" claim); lifecycle suite 20/20.
+
+## Session 21 — 2026-11-11 (D-31: hook removed; code schedules the dispatch via systemd timer)
+- BIG SANDY rejected the D-30 hook; hook `wheel-fill-report-due` removed, detector script + state deleted.
+- Lifecycle: `create_dispatch_timer()` added; `schedule_fill_report()` records account_number + timer outcome on the artifact and creates/reuses the day's one-shot timer for 13:05 PT.
+- New `scripts/fill_report_dispatch.py` + `tests/test_fill_report_dispatch.py` (3/3). Env lessons baked in: HOME setenv (transport client resolution), proxy passthrough (MCP reachability), authd works from services (no session secrets baked in). Envelope dual-key read (results/orders) after the afternoon shape drift.
+- Full-chain smoke through the production path passed (fixture on the real SMCI fill; day files byte-identical; artifact delivered; timer self-collected). Suites: lifecycle 20/20, dispatch 3/3, daily report 7/7.
+- Unpushed: scripts/fill_report_dispatch.py, tests/test_fill_report_dispatch.py, order_lifecycle.py (D-31), DEVIATIONS.md, BUILD_LOG.md.
+
+## Session 22 — 2026-11-11 (D-32: chat-delivery one-shot paired at placement)
+- BIG SANDY chose the chat-delivery pairing: every future placement step also creates/reuses the one-shot cron `wheel-fill-report-<date>-1305` for the artifact's deliver_after, which posts the code-generated dispatch into the Run-the-wheel chat (with a fallback run of the dispatch script if the OS timer was lost).
+- Dispatch template rewritten to D-31 + D-32 combined mechanism. No code changes (cron creation is agent-side by platform design). No cron created today — no placement pending.

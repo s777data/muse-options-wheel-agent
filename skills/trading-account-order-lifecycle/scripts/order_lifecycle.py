@@ -13,6 +13,8 @@ import argparse
 import hashlib
 import json
 import os
+import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -322,16 +324,73 @@ def cancel(config: Config, order_id: str) -> dict[str, Any]:
     raise LifecycleError("Cancellation remained pending after verification attempts")
 
 
+REPO_ROOT = Path(__file__).resolve().parents[3]
+DISPATCH_SCRIPT = REPO_ROOT / "scripts" / "fill_report_dispatch.py"
+
+
+def create_dispatch_timer(run_at: datetime, account_number: str) -> dict[str, Any]:
+    """Schedule the 13:05 dispatch in code: a one-shot systemd timer (D-31).
+
+    Created at fill-confirmation time via systemd-run; nothing polls in
+    between and the unit is collected after it fires. One timer per
+    trade day: if that day's timer already exists, it is reused.
+    Best-effort by design — any failure is reported in the returned
+    dict (and recorded on the artifact), never raised, so a scheduling
+    problem can never break order close-out. The artifact remains the
+    durable request either way. Set WHEEL_DISPATCH_TIMER=off to skip.
+    """
+    if os.environ.get("WHEEL_DISPATCH_TIMER", "on").lower() in ("off", "0", "disabled"):
+        return {"created": False, "reason": "disabled by WHEEL_DISPATCH_TIMER"}
+    if run_at <= datetime.now(PACIFIC):
+        return {"created": False, "reason": "run_at is not in the future"}
+    unit = f"wheel-fill-dispatch-{run_at.strftime('%Y%m%d')}"
+    try:
+        show = subprocess.run(
+            ["systemctl", "show", f"{unit}.timer", "-p", "LoadState", "--value"],
+            capture_output=True, text=True, timeout=15)
+        if show.stdout.strip() == "loaded":
+            return {"created": False, "reason": "timer already scheduled for this trade day",
+                    "unit": unit}
+        python3 = shutil.which("python3") or "/usr/bin/python3"
+        calendar = run_at.strftime("%Y-%m-%d %H:%M:%S") + " America/Los_Angeles"
+        # The service runs under the system manager with a bare
+        # environment; two things must be baked in or the dispatch
+        # cannot reach the broker (both caught by D-31 smoke tests):
+        # HOME — the Robinhood transport resolves its client from
+        # Path.home(), which is /root for the system manager; and the
+        # proxy variables — the MCP endpoint is reachable only through
+        # this sandbox's HTTP proxy, which services do not inherit.
+        # Values are passed through from this process's environment at
+        # schedule time and never logged or written to the artifact.
+        setenv = [f"--setenv=HOME={Path.home()}"]
+        for name in ("http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY",
+                     "all_proxy", "ALL_PROXY", "no_proxy", "NO_PROXY"):
+            if os.environ.get(name):
+                setenv.append(f"--setenv={name}={os.environ[name]}")
+        proc = subprocess.run(
+            ["systemd-run", f"--on-calendar={calendar}", f"--unit={unit}", "--collect",
+             *setenv,
+             python3, str(DISPATCH_SCRIPT), "--account", str(account_number)],
+            capture_output=True, text=True, timeout=30)
+        if proc.returncode != 0:
+            return {"created": False, "unit": unit,
+                    "reason": (proc.stderr or proc.stdout or "systemd-run failed").strip()[-300:]}
+        return {"created": True, "unit": unit, "fires_at": run_at.isoformat()}
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"created": False, "unit": unit, "reason": f"{type(exc).__name__}: {exc}"}
+
+
 def schedule_fill_report(config: Config, order: dict[str, Any], now: datetime | None = None,
                          report_dir: Path = FILL_REPORT_DIR) -> bool:
-    """Record the post-fill report request as an artifact (D-24).
+    """Record the post-fill report request AND schedule its dispatch (D-31).
 
-    The source scheduled a Hermes cron job for 13:05 PT. There is no
-    Hermes in this build: the same 13:05 PT timing is computed and a
-    fill-report request artifact is written under .state/fill_reports/
-    for the Muse side to pick up and deliver in chat. Nothing is
-    scheduled and nothing is sent by this function. Returns True when
-    the artifact was written.
+    The source scheduled a Hermes cron job for 13:05 PT. Here the same
+    13:05 PT timing is computed, the fill-report request artifact is
+    written under .state/fill_reports/, and create_dispatch_timer()
+    schedules a one-shot systemd timer that runs
+    scripts/fill_report_dispatch.py at that time — the code schedules
+    the dispatch at fill time; no agent-created job and no polling.
+    Returns True when the artifact was written.
     """
     now = now or datetime.now(PACIFIC)
     run_at = now.replace(hour=13, minute=5, second=0, microsecond=0)
@@ -354,6 +413,8 @@ def schedule_fill_report(config: Config, order: dict[str, Any], now: datetime | 
         "order_id": order.get("id"),
         "chain_symbol": symbol,
         "state": order.get("state"),
+        "account_number": config.account_number,
+        "dispatch_timer": create_dispatch_timer(run_at, config.account_number),
     }
     try:
         report_dir.mkdir(parents=True, exist_ok=True)
@@ -373,8 +434,9 @@ def close_out_fill(config: Config, order: dict[str, Any]) -> bool:
     cannot be bypassed by choosing a lower-level entry point (the
     Stage 2 pilot placed via place() directly and the report was never
     scheduled). Returns True when the fill-report artifact was written.
-    The Muse side runs a standing 13:05 PT dispatch that consumes
-    these artifacts and delivers the report in chat.
+    The wheel-fill-report-due hook (D-30) watches for these artifacts
+    and wakes the 13:05 PT dispatch that delivers the report in chat —
+    no standing cron, and no dispatch on days without fills.
     """
     notify_fill(order, config.notify_to)
     return schedule_fill_report(config, order)
