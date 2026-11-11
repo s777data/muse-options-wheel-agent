@@ -385,3 +385,22 @@ string and price present, else the server returns an opaque JSON-RPC
 error. Stage 3 (general per-order-confirmed use) is NOT enabled by
 this deviation — each future order still needs its own review,
 arming, and BIG SANDY's confirmation until he says otherwise.
+
+### D-26 — Fill-report scheduling made unbypassable (2026-11-11)
+Bug (BIG SANDY caught it): the copied lifecycle's 13:05 PT fill-report
+step never fired for the Stage 2 pilot. Causes: (1) schedule_fill_
+report() was called only from run()'s filled branch, and the pilot
+placed via place() directly (single-shot rule), so it never ran;
+(2) D-24 had reduced it to a record-only artifact with no consumer;
+(3) full_wheel.py never invokes the lifecycle at all. Fix: new
+close_out_fill(config, order) is the single close-out path for a
+broker-verified fill (fill notification + fill-report artifact,
+exactly once); run() now calls it, and new place_single() — the
+Stage 2+ entry point (place once, reconcile once, close out on fill)
+— calls it too, so no placement route can skip the report. Artifacts
+carry "status": "pending"; a standing Muse cron
+(wheel-fill-report-dispatch, daily 13:05 PT) consumes due artifacts,
+delivers the report in chat, and marks them delivered. Tests 18 -> 20
+(place_single filled/unfilled). Today's pilot artifact was written
+retroactively through close_out_fill (deliver_after 2026-11-11
+13:05 PT). Not yet pushed.

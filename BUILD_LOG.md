@@ -425,3 +425,14 @@
   limit within a second, premium $246 processed. Position verified:
   short SMCI Dec 18 $30P x1, avg -246. Flag removed (disarmed);
   placed/fill notifications recorded to the chat outbox.
+
+## Session 16 — 2026-11-11 (D-26: fill-report fix)
+
+- Root-caused the missing 13:05 PT fill report (see D-26) and fixed
+  it in code: close_out_fill() single close-out path; place_single()
+  single-shot entry point that reconciles and closes out; run()
+  refactored onto close_out_fill with unchanged behavior.
+- Lifecycle tests 20/20 (2 new place_single tests).
+- Wrote today's pilot fill-report artifact via close_out_fill
+  (pending, deliver_after 13:05 PT today); replaced the ad-hoc
+  one-shot cron with the standing daily 13:05 PT dispatch cron.

@@ -47,6 +47,37 @@ class OrderLifecycleTests(unittest.TestCase):
         self.assertTrue(result["fill_report_scheduled"])
         self.assertEqual([tool for tool, _ in calls], ["place_option_order", "get_option_orders"])
 
+    # D-26: the single-shot entry point closes out a fill (notify +
+    # fill-report artifact) and never schedules a report when unfilled
+    def test_place_single_filled_closes_out(self):
+        def fake_mcp(tool, args):
+            if tool == "place_option_order":
+                return {"order": {"id": "o9", "chain_symbol": "SMCI", "state": "unconfirmed", "quantity": "1", "price": "2.46", "legs": self.reviewed["legs"]}}
+            if tool == "get_option_orders":
+                return {"orders": [{"id": "o9", "chain_symbol": "SMCI", "state": "filled", "processed_quantity": "1", "pending_quantity": "0", "legs": [{**self.reviewed["legs"][0], "option_type": "put", "strike_price": "30.00", "expiration_date": "2026-12-18", "executions": [{"quantity": "1", "price": "2.46", "timestamp": "2026-11-11T19:38:25Z"}]}]}]}
+            raise AssertionError(tool)
+
+        with patch.object(lifecycle, "_lifecycle_enabled", return_value=True), patch.object(lifecycle, "call_mcp", side_effect=fake_mcp), patch.object(lifecycle, "record_notification") as notify, patch.object(lifecycle, "schedule_fill_report", return_value=True) as schedule:
+            result = lifecycle.place_single(self.reviewed, self.config, Decimal("2.46"))
+        self.assertEqual(result["status"], "filled")
+        self.assertTrue(result["fill_report_scheduled"])
+        schedule.assert_called_once()
+        self.assertEqual(notify.call_count, 2)
+
+    def test_place_single_unfilled_schedules_nothing(self):
+        def fake_mcp(tool, args):
+            if tool == "place_option_order":
+                return {"order": {"id": "o9", "chain_symbol": "SMCI", "state": "unconfirmed", "quantity": "1", "price": "2.46", "legs": self.reviewed["legs"]}}
+            if tool == "get_option_orders":
+                return {"orders": [{"id": "o9", "chain_symbol": "SMCI", "state": "confirmed", "processed_quantity": "0", "pending_quantity": "1", "legs": [{**self.reviewed["legs"][0], "option_type": "put", "strike_price": "30.00", "expiration_date": "2026-12-18"}]}]}
+            raise AssertionError(tool)
+
+        with patch.object(lifecycle, "_lifecycle_enabled", return_value=True), patch.object(lifecycle, "call_mcp", side_effect=fake_mcp), patch.object(lifecycle, "record_notification"), patch.object(lifecycle, "schedule_fill_report", return_value=True) as schedule:
+            result = lifecycle.place_single(self.reviewed, self.config, Decimal("2.46"))
+        self.assertEqual(result["status"], "confirmed")
+        self.assertFalse(result["fill_report_scheduled"])
+        schedule.assert_not_called()
+
     def test_fill_report_records_next_day_after_cutoff(self):
         with tempfile.TemporaryDirectory() as temporary:
             report_dir = Path(temporary) / "fill_reports"

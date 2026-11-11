@@ -340,6 +340,7 @@ def schedule_fill_report(config: Config, order: dict[str, Any], now: datetime | 
     symbol = str(order.get("chain_symbol", "option"))
     artifact = {
         "kind": "fill_report_request",
+        "status": "pending",
         "delivery": "claude_chat",
         "deliver_after": run_at.isoformat(),
         "destination": config.notify_to,
@@ -361,6 +362,41 @@ def schedule_fill_report(config: Config, order: dict[str, Any], now: datetime | 
     except OSError as exc:
         raise LifecycleError(f"Could not write fill-report artifact: {report_dir}") from exc
     return True
+
+
+def close_out_fill(config: Config, order: dict[str, Any]) -> bool:
+    """Single close-out path for a broker-verified fill (D-26).
+
+    Every placement route — run()'s attempt loop, or place_single()
+    below — must end a filled order here, so the fill notification and
+    the 13:05 PT fill-report request are recorded exactly once and
+    cannot be bypassed by choosing a lower-level entry point (the
+    Stage 2 pilot placed via place() directly and the report was never
+    scheduled). Returns True when the fill-report artifact was written.
+    The Muse side runs a standing 13:05 PT dispatch that consumes
+    these artifacts and delivers the report in chat.
+    """
+    notify_fill(order, config.notify_to)
+    return schedule_fill_report(config, order)
+
+
+def place_single(reviewed: dict[str, Any], config: Config, price: Decimal) -> dict[str, Any]:
+    """Single-shot placement + reconcile + close-out (D-26).
+
+    The Stage 2+ placement entry point: place once (no replacement,
+    per the confirmed-payload rule), reconcile once against the
+    broker, and — on a verified fill — close out through
+    close_out_fill() so the 13:05 PT fill report is always scheduled.
+    """
+    order = place(reviewed, config, price)
+    notify_placed(order, config.notify_to)
+    order_id = str(order.get("id", ""))
+    if not order_id:
+        raise LifecycleError("Placement response did not contain an order identifier")
+    current = status(config, order_id)
+    state = str(current.get("state", "")).lower()
+    report_recorded = close_out_fill(config, current) if state == "filled" else False
+    return {"status": state, "order": current, "fill_report_scheduled": report_recorded}
 
 
 def run(reviewed: dict[str, Any], config: Config, sleep_fn: Callable[[float], None] = time.sleep) -> dict[str, Any]:
@@ -386,8 +422,7 @@ def run(reviewed: dict[str, Any], config: Config, sleep_fn: Callable[[float], No
         state = str(current.get("state", "")).lower()
         history.append({"attempt": attempt, "state": state, "price": str(price)})
         if state == "filled":
-            notify_fill(current, config.notify_to)
-            report_recorded = schedule_fill_report(config, current)
+            report_recorded = close_out_fill(config, current)
             return {"status": "filled", "attempts": attempt, "history": history, "fill_report_scheduled": report_recorded}
         if state in {"partially_filled", "pending_cancelled", "unknown", "unconfirmed"}:
             notify_status(config.notify_to, f"⚠️ Order stopped: status {state}; no automatic replacement was made.")
