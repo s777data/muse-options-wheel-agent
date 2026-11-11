@@ -1146,15 +1146,25 @@ def build_phase5_valuation_rows(
         terminal = by_ticker[ticker]
         result = terminal.get("result")
         if not isinstance(result, dict) or not result:
-            raise RuntimeError(
-                f"Phase 5 valuation result missing for {ticker}; "
-                f"terminal_status={terminal.get('status')!r}, "
-                "valuation package output was not retrieved"
-            )
+            # DEVIATION D-17 (revived 2026-11-11 at BIG SANDY's instruction
+            # after LEGN, a 20-F foreign filer with no 10-K, killed a live
+            # run at this merge): a terminal insufficient_data record is a
+            # genuine no-data outcome (no 10-K / shell / recent IPO), not a
+            # retrieval failure. Carry it as a structured unscored row —
+            # same schema, scores None, failure_reason preserved — so one
+            # no-data name no longer stops the whole cohort. Any other
+            # terminal status with a missing result still fails closed.
+            if str(terminal.get("status") or "") != "insufficient_data":
+                raise RuntimeError(
+                    f"Phase 5 valuation result missing for {ticker}; "
+                    f"terminal_status={terminal.get('status')!r}, "
+                    "valuation package output was not retrieved"
+                )
+            result = {}
         business_quality = result.get("business_quality") or {}
         valuation_block = result.get("valuation") or {}
         status = str(terminal.get("status") or result.get("status") or "unknown")
-        confidence = result.get("confidence")
+        confidence = result.get("confidence") or terminal.get("confidence")
         confidence_key = str(confidence or "unavailable").lower()
         confidence_counts[confidence_key] = confidence_counts.get(confidence_key, 0) + 1
         status_counts[status] = status_counts.get(status, 0) + 1

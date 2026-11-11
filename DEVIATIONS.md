@@ -144,12 +144,28 @@ here. Nothing else differs intentionally.
   and `scan_cap_override_usd`. Collateral capacity checks still use
   real buying power and order placement remains hard-disabled, so
   the override widens analysis scope only. Unset = original behavior.
-- **D-17 (DECLINED by BIG SANDY 2026-11-09 — 'ignore GENB'; not applied):** adapter exception path should
-  emit the structured insufficient_data envelope instead of
-  `result: null` when the dashboard engine raises before producing
-  a result (e.g. GENB: no 10-K on EDGAR). Today the source's merge
-  step hard-fails the whole run on a null result; with the envelope,
-  such tickers are excluded per-ticker like KEEL/BRK.B.
+- **D-17 (DECLINED by BIG SANDY 2026-11-09 — 'ignore GENB'; REVIVED and
+  BUILT 2026-11-11 at his instruction after LEGN killed a live run):**
+  adapter exception path should emit the structured insufficient_data
+  envelope instead of `result: null` when the dashboard engine raises
+  before producing a result (e.g. GENB: no 10-K on EDGAR). Today the
+  source's merge step hard-fails the whole run on a null result; with
+  the envelope, such tickers are excluded per-ticker like KEEL/BRK.B.
+  AS BUILT (2026-11-11): the envelope is realized at the merge —
+  `build_phase5_valuation_rows` (scripts/csp_screening.py) carries a
+  terminal `insufficient_data` record with a missing result as a
+  structured unscored row (identical schema, all score fields None,
+  engine failure_reason preserved, Phase 4 price/market-cap fields
+  kept, sorts last, counted in summary status_counts/unscored_count).
+  Any other terminal status with a missing result (error, timeout,
+  unknown) still raises — retrieval failures stay fail-closed. Trigger:
+  live run 20261111T183812Z-05fa98b4 failed at the Phase 5 merge on
+  LEGN (Legend Biotech, CIK 0001801198), a foreign private issuer that
+  files Form 20-F, not 10-K — the same no-10-K class as GENB. Tests:
+  tests/test_phase5_d17.py 15/15 (mixed cohort reconciles 1:1, LEGN
+  row unscored with reason preserved, error/timeout/unknown still
+  raise, scored passthrough); live controls MU 68.8 / NVDA 65.8 /
+  V 52.6 / BRK.B unscored unchanged.
 - **D-18 (Engine update, 2026-11-09, BIG SANDY approved):** vendored
   dashboard engine advanced past ac8deaf with three generic fixes,
   built in the dashboard working copy and synced here (diff-verified;
@@ -283,3 +299,89 @@ instruments, nested quote unwrapped with real bid/ask/delta); standalone
 Phase 8 completes clean (0 equity positions -> no recommendations);
 full run 20261111T173746Z-710fab6e is the first with failure: null —
 Phases 1/2/8 ok, 3–7 skipped under D-20.
+
+### D-24 — Order placement enablement, Stage 0: lifecycle plumbing, still disabled (2026-11-11)
+
+Stage 0 of the Order Placement Enablement plan (see
+~/workspace/goals/options-wheel-agent-build/files/
+order-placement-enablement-plan.md). Plumbing only — no layer was
+opened, nothing was armed, no order was placed, previewed live, or
+cancelled. All changes are in
+skills/trading-account-order-lifecycle/scripts/order_lifecycle.py
+plus its unit tests.
+
+1. **Dead bridge removed.** `call_mcp()` shelled out to
+   `company_valuation_score/scripts/mcp_bridge.py`, a path that was
+   never copied into this repo, so every lifecycle broker call would
+   have failed. It now routes through a single seam,
+   `_transport_call()`, into the wheel's own transport
+   (scripts/robinhood_transport.py) and returns the payload's `data`
+   object, the shape the copied code was written against. Reads
+   (get_option_orders, get_option_positions, review_option_order,
+   get_option_quotes, ...) work through the transport's allowlist.
+   `get_trade_approval_setting` is NOT offered by the local client
+   (the allowlisted read is `get_trade_approvals`); it stays for
+   Stage 1 to establish. `WriteToolDisabled` from the transport
+   propagates unchanged; other transport failures surface as
+   LifecycleError.
+2. **Hermes/Telegram assumptions removed.** `send_telegram()` (which
+   shelled to `hermes send` under a Hermes profile) is replaced by
+   `record_notification()`: the message is appended to a JSONL outbox
+   artifact (.state/robinhood_notification_outbox.jsonl) for delivery
+   in Muse chat — recorded, never fake-sent. Dedup semantics are
+   unchanged (provider is now `claude_chat`; a failed record is not
+   marked recorded). `setup_cron()` (which shelled to `hermes cron
+   create`) is replaced by `schedule_fill_report()`: the same 13:05 PT
+   timing is computed and a fill-report request artifact is written
+   under .state/fill_reports/ for Muse to pick up; run()'s result
+   key is now `fill_report_scheduled`. Config field `telegram_to` is
+   renamed `notify_to`; the CLI takes `--notify-to` (`--telegram-to`
+   kept as a legacy alias).
+3. **Guard untouched.** The D-08 dual control is byte-for-byte as
+   before: place/cancel/run raise OrderLifecycleDisabled unless env
+   WHEEL_ORDER_LIFECYCLE_ENABLE=1 AND the flag file named by
+   WHEEL_ORDER_LIFECYCLE_FLAG exists. Neither was set. The Robinhood
+   client (custom.robinhood/bin/client.py) and its ALLOWED_TOOLS were
+   not edited; place/cancel remain absent from it, and the transport
+   still raises WriteToolDisabled for every order write.
+4. **Tests.** The copied lifecycle tests predate the D-08 guard and
+   failed at baseline (15 tests, 2 errors — both run() tests hit the
+   guard). They now arm `_lifecycle_enabled` explicitly in-test for
+   the state-machine cases, and the Telegram/Hermes-cron tests were
+   rewritten against the outbox/fill-report artifacts. New Stage 0
+   tests prove: (a) lifecycle reads go through the mocked transport
+   (status/call_mcp for orders, positions, review), (b) place/cancel/
+   run raise with neither control, with env-only, and with flag-only,
+   (c) the real transport raises WriteToolDisabled for
+   place_option_order and cancel_option_order, including through the
+   lifecycle's own call_mcp. Suite: 18 tests, all pass; compileall on
+   scripts/skills/tests/vendor OK; import smokes OK.
+
+Stage 1 (preview-only Phase 9 fire drill) is NOT started; it needs
+BIG SANDY's go and the D1–D5 decisions in the plan.
+
+### D-25 — Order placement enablement, Stage 2 pilot executed (2026-11-11)
+At BIG SANDY's explicit confirmation of the exact reviewed payload
+("Enable Stage 2 — place this exact order"): (1) client.py
+ALLOWED_TOOLS gained place_option_order + cancel_option_order ONLY
+(backup bin/client.py.bak-2026-11-11-stage2; all other write tools
+remain blocked); (2) scripts/robinhood_transport.py gained an
+ORDER_TOOLS category with exactly those two tools (removed from
+WRITE_TOOLS; every other write still raises WriteToolDisabled);
+(3) the lifecycle test for the old transport block was updated to the
+new contract (18/18 pass). Pilot flow, all per the plan: fresh Phase 9
+review (order_checks {}, customer_approval_required false — no in-app
+approval needed), dual-control arming (env + per-order flag file),
+ONE placement via lifecycle place() (no auto-replacement; D4
+single-shot), guard disarmed immediately after (flag removed).
+Pilot order: sell to open 1x SMCI Dec 18 2026 $30P, limit $2.46
+credit, GFD, agentic …6392 — broker order
+6af4c431-525a-4505-ac48-de7d4b9a4f86, FILLED at $2.46 in <1s
+(2026-11-11T19:38:25Z), premium $246, position verified short x1 avg
+-246. Notes: lifecycle place() strips ref_id before calling (server
+assigns the order id; reconcile-first policy covers the gap — no
+blind resubmission ever); review payload requires quantity as a
+string and price present, else the server returns an opaque JSON-RPC
+error. Stage 3 (general per-order-confirmed use) is NOT enabled by
+this deviation — each future order still needs its own review,
+arming, and BIG SANDY's confirmation until he says otherwise.

@@ -48,9 +48,19 @@ NON_ORDER_ACTION_TOOLS = {
     "create_scan", "run_scan", "review_option_order",
 }
 
+# Order tools (D-25, Stage 2 of the order-placement enablement plan,
+# opened 2026-11-11 with BIG SANDY's explicit approval): exactly two
+# tools. The shim passes them through; the control is the lifecycle's
+# dual-control guard (WHEEL_ORDER_LIFECYCLE_ENABLE=1 plus the
+# user-controlled flag file) and BIG SANDY's per-order confirmation of
+# the exact reviewed payload. Every other write tool stays blocked.
+ORDER_TOOLS = {
+    "place_option_order", "cancel_option_order",
+}
+
 WRITE_TOOLS = {
-    "place_option_order", "place_equity_order", "place_crypto_order",
-    "cancel_option_order", "cancel_equity_order", "cancel_crypto_order",
+    "place_equity_order", "place_crypto_order",
+    "cancel_equity_order", "cancel_crypto_order",
     "cancel_option_exercise", "exercise_option",
     "review_equity_order", "preview_crypto_order", "decline_trade_approval",
     "update_scan_config", "update_scan_filters",
@@ -82,7 +92,8 @@ def call_robinhood_tool(name: str, arguments: dict | None = None,
     if name in WRITE_TOOLS:
         raise WriteToolDisabled(
             f"write tool {name!r} is hard-disabled in muse-options-wheel-agent")
-    if name not in READ_TOOLS and name not in NON_ORDER_ACTION_TOOLS:
+    if (name not in READ_TOOLS and name not in NON_ORDER_ACTION_TOOLS
+            and name not in ORDER_TOOLS):
         raise ToolNotAllowlisted(
             f"tool {name!r} is not in the local Robinhood client's "
             f"read allowlist (see INVENTORY.md parity gaps)")

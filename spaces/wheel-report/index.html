@@ -562,13 +562,27 @@
           '<span class="stat"><b>' + elite + "</b> GAV-Code Elite</span>" +
           '<span class="stat">Growth source: <b>' + scored.filter(function (r) { return r.gav_code_source === "ttm_bridge"; }).length + "</b> TTM bridge · <b>" + scored.filter(function (r) { return r.gav_code_source === "quarterly_sum"; }).length + "</b> quarterly sum · <b>" + scored.filter(function (r) { return r.gav_code_source === "fy_annual"; }).length + "</b> FY annual · <b>" + scored.filter(function (r) { return r.fallback || r.gav_code_source === "yfinance_annual_fallback"; }).length + "</b> yfinance fallback</span>";
       }
-      /* Phase 7 recommendations, keyed by run_id — only the $40 run has one. */
+      /* Phase 7 recommendations, keyed by run_id. */
       var REC_BY_RUN = {
         "20261110T034515Z-beb17c40": {
           title: "Phase 7 Recommendation — CSP (closing-quote rehearsal)",
           picks: [
             { rank: 1, ticker: "HIMS", action: "Sell cash-secured put", expiration: "2026-12-18", dte: 39, strike: 22.00, underlying: 22.935, bid: 2.08, ask: 2.30, premium: 208, netCollateral: 1992, netRoc: 10.44, pop: 0.638, delta: -0.382, spreadPct: 10.0, oi: 2311, volume: 92, maxContracts: 2, finalCode: 59.7, business: 61.2, value: 55.9, mode: "strict" },
             { rank: 2, ticker: "SMCI", action: "Sell cash-secured put", expiration: "2026-12-18", dte: 39, strike: 28.00, underlying: 28.605, bid: 2.42, ask: 2.60, premium: 242, netCollateral: 2558, netRoc: 9.46, pop: 0.634, delta: -0.411, spreadPct: 7.2, oi: 6103, volume: 3394, maxContracts: 1, finalCode: 66.3, business: 56.2, value: 70.2, mode: "strict" }
+          ]
+        },
+        "20261111T191446Z-dca26a9e": {
+          title: "Phase 7 Recommendation — CSP (live, market hours)",
+          heading: "Phase 7 Recommendation <span class=\"thin\">— CSP (live run)</span>",
+          sub: "Phase 6 + Phase 7 for this run only — <strong>__LABEL__</strong>. One contract qualified in the strict primary attempt: SMCI.",
+          caveats: [
+            "<strong>Source:</strong> live Phase 6 + Phase 7 run on Nov 11, 2026, market hours (quotes ~1.5s old at ranking, 11:25 AM PT). Production gates unchanged; D-17 carried 5 unscored names (AADX, GENB, LEGN, SECZ, SSMR) as rows instead of stopping the run.",
+            "<strong>Buying power:</strong> real — $4,016.17 in the agentic account (scan cap $40.16). The $3,000 collateral fits with $1,262 to spare.",
+            "<strong>Placed &amp; filled:</strong> this recommendation was placed by the agent under the Stage 2 pilot of the order-placement enablement plan (D-25) after a clean Phase 9 review (no order checks, no in-app approval required) and BIG SANDY's confirmation of the exact payload — sell to open 1 contract at the $2.46 limit, broker order 6af4c431-525a-4505-ac48-de7d4b9a4f86, <strong>filled at $2.46 on Nov 11, 2026, 11:38 AM PT</strong> ($246 premium)."
+          ],
+          note: "* “Independent max contracts” is a per-contract mathematical maximum at this run's buying power, not a simultaneous portfolio allocation.",
+          picks: [
+            { rank: 1, ticker: "SMCI", action: "Sell cash-secured put", expiration: "2026-12-18", dte: 37, strike: 30.00, underlying: 30.625, bid: 2.46, ask: 2.52, premium: 246, netCollateral: 2754, netRoc: 8.93, pop: 0.638, delta: -0.412, spreadPct: 2.4, oi: 17447, volume: 363, maxContracts: 1, finalCode: 66.1, business: 56.2, value: 69.6, mode: "strict" }
           ]
         }
       };
@@ -598,16 +612,23 @@
               row("Final-Code", p.finalCode.toFixed(1)) + row("Business / Value", p.business.toFixed(1)+" / "+p.value.toFixed(1)) +
             '</div></article>';
         }).join("");
+        var heading = rec.heading || 'Phase 7 Recommendation <span class="thin">— CSP (closing-quote rehearsal)</span>';
+        var sub = rec.sub ? rec.sub.replace("__LABEL__", esc(run.label || ""))
+          : 'Phase 6 + Phase 7 rehearsal for this run only — <strong>' + esc(run.label || "") + '</strong>. Rank 1 is HIMS, Rank 2 is SMCI.';
+        var caveats = rec.caveats || [
+          '<strong>Source:</strong> Phase 6 + Phase 7 rehearsal on Nov 9, 2026 using last closing quotes (quote time 2026-11-09 20:59:59 UTC; about 8.6 hours old). The quote-freshness relaxation was harness-only; production gates are unchanged.',
+          '<strong>Buying-power premise:</strong> $4,000 to match the $40 scan cap. Actual agentic account buying power was $206.25, which funds neither contract. No orders were placed; order lifecycle phases remain disabled.',
+          '<strong>Path:</strong> primary cohort HRMY, BRBR, LGN, UNIT, NRIX qualified 0 in the strict 30–45 DTE window; selected attempt was strict_top_6_10 from the secondary cohort; fallback DTE was not used in the run. A separate forced probe of the primary cohort in the 25–60 DTE fallback window also qualified 0.'
+        ];
+        var note = rec.note || '* “Independent max contracts” is a per-contract mathematical maximum at the $4,000 premise, not a simultaneous portfolio allocation — the two picks are not sized to be bought together. Figures are closing-quote values from the rehearsal and will differ at the next open.';
         el.innerHTML =
-          '<h2>Phase 7 Recommendation <span class="thin">— CSP (closing-quote rehearsal)</span></h2>' +
-          '<p class="rec-sub">Phase 6 + Phase 7 rehearsal for this run only — <strong>' + esc(run.label || "") + '</strong>. Rank 1 is HIMS, Rank 2 is SMCI.</p>' +
-          '<div class="rec-caveats"><strong>Context &amp; caveats</strong><ul>' +
-          '<li><strong>Source:</strong> Phase 6 + Phase 7 rehearsal on Nov 9, 2026 using last closing quotes (quote time 2026-11-09 20:59:59 UTC; about 8.6 hours old). The quote-freshness relaxation was harness-only; production gates are unchanged.</li>' +
-          '<li><strong>Buying-power premise:</strong> $4,000 to match the $40 scan cap. Actual agentic account buying power was $206.25, which funds neither contract. No orders were placed; order lifecycle phases remain disabled.</li>' +
-          '<li><strong>Path:</strong> primary cohort HRMY, BRBR, LGN, UNIT, NRIX qualified 0 in the strict 30–45 DTE window; selected attempt was strict_top_6_10 from the secondary cohort; fallback DTE was not used in the run. A separate forced probe of the primary cohort in the 25–60 DTE fallback window also qualified 0.</li>' +
-          '</ul></div>' +
+          '<h2>' + heading + '</h2>' +
+          '<p class="rec-sub">' + sub + '</p>' +
+          '<div class="rec-caveats"><strong>Context &amp; caveats</strong><ul><li>' +
+          caveats.join('</li><li>') +
+          '</li></ul></div>' +
           '<div class="rec-cards">' + cards + '</div>' +
-          '<p class="rec-note">* “Independent max contracts” is a per-contract mathematical maximum at the $4,000 premise, not a simultaneous portfolio allocation — the two picks are not sized to be bought together. Figures are closing-quote values from the rehearsal and will differ at the next open.</p>';
+          '<p class="rec-note">' + note + '</p>';
       }
       function renderAll() { renderChrome(); renderStats(); render(); renderRec(); }
 

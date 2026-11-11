@@ -366,3 +366,62 @@
   FIGR chain/instruments/quote path exercised end-to-end; standalone
   Phase 8 clean; full run 20261111T173746Z-710fab6e failure: null
   (P1/P2/P8 ok, P3-7 D-20 skip) — first fully green pipeline run.
+
+## Session 13 — 2026-11-11 (Order placement enablement, Stage 0 — D-24)
+
+- BIG SANDY approved starting the Phases 9–11 enablement project;
+  Stage 0 (plumbing, still disabled) implemented per the plan file in
+  the goal workspace. No layer opened, nothing armed, client
+  untouched, no order placed/previewed/cancelled.
+- order_lifecycle.py: dead mcp_bridge path removed; call_mcp routes
+  through scripts/robinhood_transport.py via a `_transport_call` seam
+  and returns the payload `data` object; WriteToolDisabled propagates
+  unchanged. send_telegram -> record_notification (JSONL outbox
+  artifact for Muse chat delivery, dedup preserved, provider
+  claude_chat). setup_cron -> schedule_fill_report (13:05 PT timing
+  kept; fill-report request artifact under .state/fill_reports/).
+  Config.telegram_to -> notify_to; CLI --notify-to (legacy
+  --telegram-to alias kept).
+- Tests: baseline was 15 tests / 2 errors (copied run() tests hit the
+  D-08 guard). Now 18 tests, all pass — state-machine tests arm the
+  guard explicitly in-test; new Stage 0 tests cover the mocked
+  transport read path, guard behavior with neither/env-only/flag-only
+  controls, and WriteToolDisabled on the real transport for
+  place/cancel. compileall OK; guard smoke: place/cancel/run all
+  raise OrderLifecycleDisabled with a clean environment.
+
+## Session 14 — 2026-11-11 (D-17 revived: Phase 5 insufficient_data envelope)
+
+- Trigger: live run 20261111T183812Z-05fa98b4 (BIG SANDY "just run the
+  wheel", BP $4,016.17, cap $40.16) failed at the Phase 5 merge:
+  LEGN terminal_status='insufficient_data', result null. Root cause
+  verified standalone: engine raises "No 10-K found in EDGAR
+  submissions for CIK 0001801198" — LEGN (Legend Biotech) files 20-F
+  as a foreign private issuer. Same class as GENB (D-17 declined
+  2026-11-09). BIG SANDY chose "Build the D-17 fix first, then rerun".
+- Change: scripts/csp_screening.py `build_phase5_valuation_rows` —
+  terminal insufficient_data + missing result now builds a structured
+  unscored row (same schema, scores None, failure_reason carried,
+  Phase 4 fields kept); other statuses with missing results still
+  raise RuntimeError. Row `confidence` falls back to the terminal
+  record when the result carries none.
+- Tests: tests/test_phase5_d17.py 15/15 pass; live Phase 5 controls
+  MU 68.8 / NVDA 65.8 / V 52.6 / BRK.B unscored (structure unchanged);
+  order-lifecycle unittest suite OK.
+
+## Session 15 — 2026-11-11 (Stage 2 pilot: first agent-placed order, D-25)
+
+- Stage 1 preview drill (same morning): review_option_order for the
+  rerun's Phase 7 recommendation — SMCI Dec 18 '26 $30P sell-to-open
+  x1 @ $2.46 — order_checks {}, customer_approval_required false,
+  collateral $3,000, fees $0.04. Payload hashed into the run dir.
+- BIG SANDY confirmed the exact payload ("Enable Stage 2 — place
+  this exact order", 11:36 AM PT). Client + shim opened for
+  place/cancel only (D-25); lifecycle tests 18/18; guard verified
+  refusing while unarmed; fresh re-review at 11:38 AM still clean
+  (bid $2.41 / ask $2.52 / mark $2.47).
+- Armed (env + flag), placed once via lifecycle place(): broker
+  order 6af4c431-525a-4505-ac48-de7d4b9a4f86 — FILLED at the $2.46
+  limit within a second, premium $246 processed. Position verified:
+  short SMCI Dec 18 $30P x1, avg -246. Flag removed (disarmed);
+  placed/fill notifications recorded to the chat outbox.

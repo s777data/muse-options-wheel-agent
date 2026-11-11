@@ -110,3 +110,20 @@ Local client gate (`~/workspace/custom-connectors/custom.robinhood/bin/client.py
 The transport shim (`scripts/robinhood_transport.py`) enforces the same
 15-tool read allowlist and raises `WriteToolDisabled` for any write tool,
 so these gaps surface as explicit errors, never silent fallbacks.
+
+**Update 2026-11-11 (D-15 / D-24 / D-25) — the section above predates
+these changes:** the client allowlist was extended with BIG SANDY's
+approval in stages: D-15 (2026-11-09) added `create_scan`, `run_scan`,
+`get_equity_tax_lots`, `get_trade_approvals`, `review_option_order`
+(so the Phase 4A scanner, Phase 8 tax lots, and Phase 9 review all
+run); D-25 (2026-11-11, Stage 2 of the order-placement enablement
+plan) added exactly `place_option_order` + `cancel_option_order`.
+The transport now has three categories — READ_TOOLS,
+NON_ORDER_ACTION_TOOLS, and ORDER_TOOLS (D-25, place/cancel only);
+every other write tool still raises `WriteToolDisabled`. The order
+lifecycle was re-plumbed onto this transport in D-24 (no more dead
+bridge; notifications recorded for Muse chat instead of Telegram),
+and placement remains gated by its dual-control guard
+(`WHEEL_ORDER_LIFECYCLE_ENABLE=1` + user-controlled flag file) plus
+BIG SANDY's per-order confirmation of the exact reviewed payload.
+First pilot order placed and filled 2026-11-11 (D-25).

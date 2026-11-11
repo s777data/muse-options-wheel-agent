@@ -13,7 +13,6 @@ import argparse
 import hashlib
 import json
 import os
-import subprocess
 import sys
 import tempfile
 import time
@@ -55,12 +54,22 @@ def _guard(action: str) -> None:
             "(both default absent)")
 
 
-BRIDGE = Path(__file__).resolve().parents[2] / "company_valuation_score/scripts/mcp_bridge.py"
+# D-24 (Stage 0 of the order-placement enablement plan): the broker
+# path no longer shells to the source repo's mcp_bridge.py — that file
+# was never copied into this repo (D-08 note), so every lifecycle MCP
+# call failed. call_mcp() below now routes through the wheel's own
+# transport, scripts/robinhood_transport.py, which enforces the client
+# allowlist and raises WriteToolDisabled for every order write tool.
+# Notifications and the fill report no longer assume a Hermes profile
+# or a Telegram bot: they are recorded as artifacts for delivery in
+# Muse chat (see record_notification / schedule_fill_report).
 REPO_ROOT = Path(__file__).resolve().parents[3]
-PROFILE = "options-wheel-agent"
 PACIFIC = ZoneInfo("America/Los_Angeles")
 NOTIFICATION_STATE_FILE = REPO_ROOT / ".state" / "robinhood_notification_dedup.json"
+NOTIFICATION_OUTBOX_FILE = REPO_ROOT / ".state" / "robinhood_notification_outbox.jsonl"
+FILL_REPORT_DIR = REPO_ROOT / ".state" / "fill_reports"
 NOTIFICATION_STATE_VERSION = 1
+NOTIFICATION_PROVIDER = "claude_chat"
 
 
 class LifecycleError(RuntimeError):
@@ -70,7 +79,7 @@ class LifecycleError(RuntimeError):
 @dataclass(frozen=True)
 class Config:
     account_number: str
-    telegram_to: str
+    notify_to: str
     max_attempts: int
     wait_seconds: int
     replacement_step: Decimal
@@ -85,28 +94,44 @@ def _decimal(value: Any, field: str) -> Decimal:
         raise LifecycleError(f"Invalid numeric field: {field}") from exc
 
 
-def _run(command: list[str], *, env: dict[str, str] | None = None, input_text: str | None = None) -> str:
-    proc = subprocess.run(command, input=input_text, text=True, capture_output=True, env=env, check=False)
-    if proc.returncode != 0:
-        raise LifecycleError(f"Command failed ({proc.returncode}): {' '.join(command)}: {proc.stderr[-500:]}")
-    return proc.stdout.strip()
+def _transport_call(tool: str, arguments: dict[str, Any]) -> Any:
+    """Single seam to the wheel transport (scripts/robinhood_transport.py).
+
+    Imported lazily so this module imports cleanly on its own and unit
+    tests can patch this one function. The transport returns the MCP
+    structuredContent payload and raises WriteToolDisabled for write
+    tools / ToolNotAllowlisted for non-allowlisted tools before any
+    subprocess runs.
+    """
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from scripts.robinhood_transport import call_robinhood_tool
+    return call_robinhood_tool(tool, arguments)
 
 
 def call_mcp(tool: str, arguments: dict[str, Any]) -> dict[str, Any]:
-    output = _run(["python3", str(BRIDGE), "robinhood-trading", tool], input_text=json.dumps(arguments))
+    """Call a broker tool through the wheel transport (D-24).
+
+    Read tools (get_option_orders, get_option_positions,
+    review_option_order, ...) return the payload's ``data`` object,
+    matching the shape the copied lifecycle was written against.
+    WriteToolDisabled propagates unchanged — it is the signal that an
+    order write was attempted through a hard-disabled path; other
+    transport failures surface as LifecycleError.
+    """
+    if str(REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(REPO_ROOT))
+    from scripts.robinhood_transport import RobinhoodTransportError, WriteToolDisabled
     try:
-        envelope = json.loads(output.splitlines()[-1])
-    except (IndexError, json.JSONDecodeError) as exc:
-        raise LifecycleError(f"Invalid MCP response for {tool}") from exc
-    if envelope.get("error"):
-        raise LifecycleError(f"{tool}: {envelope['error']}")
-    if isinstance(envelope.get("structuredContent"), dict):
-        data = envelope["structuredContent"].get("data", envelope["structuredContent"])
-    elif isinstance(envelope.get("result"), str):
-        parsed = json.loads(envelope["result"])
-        data = parsed.get("data", parsed)
+        structured = _transport_call(tool, arguments)
+    except WriteToolDisabled:
+        raise
+    except RobinhoodTransportError as exc:
+        raise LifecycleError(str(exc)) from exc
+    if isinstance(structured, dict) and isinstance(structured.get("data"), dict):
+        data = structured["data"]
     else:
-        data = envelope.get("data", envelope)
+        data = structured
     if not isinstance(data, dict):
         raise LifecycleError(f"Unexpected MCP data for {tool}")
     return data
@@ -162,22 +187,42 @@ def _write_notification_state(path: Path, state: dict[str, Any]) -> None:
         raise LifecycleError(f"Could not persist notification deduplication state: {path}") from exc
 
 
-def send_telegram(destination: str, message: str, *, state_path: Path = NOTIFICATION_STATE_FILE) -> bool:
-    target = destination if destination.startswith("telegram:") else f"telegram:{destination}"
-    provider = "telegram"
-    destination_value = target.removeprefix("telegram:")
-    notification_hash = _notification_hash(provider, destination_value, message)
+def record_notification(destination: str, message: str, *, state_path: Path = NOTIFICATION_STATE_FILE,
+                        outbox_path: Path = NOTIFICATION_OUTBOX_FILE) -> bool:
+    """Record a notification for Muse chat delivery (D-24).
+
+    There is no Hermes profile and no Telegram bot in this build, so
+    nothing is "sent" here: the message is appended to the notification
+    outbox artifact (JSONL under .state/), which the interactive Muse
+    session surfaces in chat. Deduplication semantics are unchanged
+    from the copied Telegram version — an identical
+    (provider, destination, message) is recorded only once, and a
+    failed record is not marked as recorded. Returns True when a new
+    record was written.
+    """
+    notification_hash = _notification_hash(NOTIFICATION_PROVIDER, destination, message)
     state = _load_notification_state(state_path)
     if notification_hash in state["notifications"]:
         return False
-    env = dict(os.environ)
-    env["HERMES_PROFILE"] = PROFILE
-    _run(["hermes", "send", "--to", target, message], env=env)
-    state["notifications"][notification_hash] = {
-        "provider": provider,
-        "destination": destination_value,
+    record = {
+        "recorded_at": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+        "provider": NOTIFICATION_PROVIDER,
+        "destination": destination,
+        "message": message,
         "message_hash": notification_hash,
-        "sent_at": datetime.now(tz=ZoneInfo("UTC")).isoformat(),
+        "delivery": "claude_chat_outbox: recorded, not sent — the interactive Muse session delivers it in chat",
+    }
+    try:
+        outbox_path.parent.mkdir(parents=True, exist_ok=True)
+        with outbox_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, sort_keys=True) + "\n")
+    except OSError as exc:
+        raise LifecycleError(f"Could not record notification to outbox: {outbox_path}") from exc
+    state["notifications"][notification_hash] = {
+        "provider": NOTIFICATION_PROVIDER,
+        "destination": destination,
+        "message_hash": notification_hash,
+        "sent_at": record["recorded_at"],
     }
     _write_notification_state(state_path, state)
     return True
@@ -194,7 +239,7 @@ def notify_placed(order: dict[str, Any], destination: str) -> None:
         f"Limit: ${order.get('price', 'N/A')}\n"
         f"Status: {order.get('state', 'unknown')}"
     )
-    send_telegram(destination, message)
+    record_notification(destination, message)
 
 
 def notify_fill(order: dict[str, Any], destination: str) -> None:
@@ -212,11 +257,11 @@ def notify_fill(order: dict[str, Any], destination: str) -> None:
         f"Remaining quantity: {order.get('pending_quantity', '0')}\n"
         f"Timestamp: {execution.get('timestamp', order.get('updated_at', 'N/A'))}"
     )
-    send_telegram(destination, message)
+    record_notification(destination, message)
 
 
 def notify_status(destination: str, text: str) -> None:
-    send_telegram(destination, text)
+    record_notification(destination, text)
 
 
 def _round_toward(value: Decimal, tick: Decimal, direction: str) -> Decimal:
@@ -277,28 +322,44 @@ def cancel(config: Config, order_id: str) -> dict[str, Any]:
     raise LifecycleError("Cancellation remained pending after verification attempts")
 
 
-def setup_cron(config: Config, order: dict[str, Any], now: datetime | None = None) -> bool:
+def schedule_fill_report(config: Config, order: dict[str, Any], now: datetime | None = None,
+                         report_dir: Path = FILL_REPORT_DIR) -> bool:
+    """Record the post-fill report request as an artifact (D-24).
+
+    The source scheduled a Hermes cron job for 13:05 PT. There is no
+    Hermes in this build: the same 13:05 PT timing is computed and a
+    fill-report request artifact is written under .state/fill_reports/
+    for the Muse side to pick up and deliver in chat. Nothing is
+    scheduled and nothing is sent by this function. Returns True when
+    the artifact was written.
+    """
     now = now or datetime.now(PACIFIC)
     run_at = now.replace(hour=13, minute=5, second=0, microsecond=0)
     if now >= run_at:
         run_at += timedelta(days=1)
-    prompt = (
-        "Run the lifecycle fill-report workflow for the broker-verified fill from today. "
-        "Execute the Python builder and renderer under "
-        "/home/s777data/.hermes/profiles/options-wheel-agent/skills/"
-        "trading-account-order-lifecycle/scripts/, verify non-empty artifacts, and deliver "
-        "the generated Telegram message through the configured options-wheel-agent bot. "
-        "Do not place, cancel, replace, or recursively schedule any order."
-    )
-    env = dict(os.environ)
-    env["HERMES_PROFILE"] = PROFILE
-    _run([
-        "hermes", "cron", "create",
-        run_at.isoformat(),
-        prompt,
-        "--name", f"order-fill-report-{order.get('chain_symbol', 'option')}",
-        "--deliver", config.telegram_to if config.telegram_to.startswith("telegram:") else f"telegram:{config.telegram_to}",
-    ], env=env)
+    symbol = str(order.get("chain_symbol", "option"))
+    artifact = {
+        "kind": "fill_report_request",
+        "delivery": "claude_chat",
+        "deliver_after": run_at.isoformat(),
+        "destination": config.notify_to,
+        "instruction": (
+            "Run the lifecycle fill-report workflow for the broker-verified fill from today. "
+            "Execute the Python builder and renderer under "
+            "skills/trading-account-order-lifecycle/scripts/ in this repo, verify non-empty "
+            "artifacts, and deliver the generated report in Muse chat. "
+            "Do not place, cancel, replace, or recursively schedule any order."
+        ),
+        "order_id": order.get("id"),
+        "chain_symbol": symbol,
+        "state": order.get("state"),
+    }
+    try:
+        report_dir.mkdir(parents=True, exist_ok=True)
+        name = f"fill-report-{symbol}-{order.get('id') or run_at.strftime('%Y%m%d')}.json"
+        (report_dir / name).write_text(json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    except OSError as exc:
+        raise LifecycleError(f"Could not write fill-report artifact: {report_dir}") from exc
     return True
 
 
@@ -308,7 +369,7 @@ def run(reviewed: dict[str, Any], config: Config, sleep_fn: Callable[[float], No
         raise LifecycleError("max_attempts must be positive")
     if not reviewed.get("legs"):
         raise LifecycleError("Reviewed order must include legs")
-    config = Config(config.account_number or str(reviewed.get("account_number", "")), config.telegram_to, config.max_attempts, config.wait_seconds, config.replacement_step, config.min_credit)
+    config = Config(config.account_number or str(reviewed.get("account_number", "")), config.notify_to, config.max_attempts, config.wait_seconds, config.replacement_step, config.min_credit)
     if not config.account_number:
         raise LifecycleError("An account number is required")
     current_review = dict(reviewed)
@@ -316,7 +377,7 @@ def run(reviewed: dict[str, Any], config: Config, sleep_fn: Callable[[float], No
     history: list[dict[str, Any]] = []
     for attempt in range(1, config.max_attempts + 1):
         order = place(current_review, config, price)
-        notify_placed(order, config.telegram_to)
+        notify_placed(order, config.notify_to)
         order_id = str(order.get("id", ""))
         if not order_id:
             raise LifecycleError("Placement response did not contain an order identifier")
@@ -325,21 +386,21 @@ def run(reviewed: dict[str, Any], config: Config, sleep_fn: Callable[[float], No
         state = str(current.get("state", "")).lower()
         history.append({"attempt": attempt, "state": state, "price": str(price)})
         if state == "filled":
-            notify_fill(current, config.telegram_to)
-            cron_created = setup_cron(config, current)
-            return {"status": "filled", "attempts": attempt, "history": history, "cron_created": cron_created}
+            notify_fill(current, config.notify_to)
+            report_recorded = schedule_fill_report(config, current)
+            return {"status": "filled", "attempts": attempt, "history": history, "fill_report_scheduled": report_recorded}
         if state in {"partially_filled", "pending_cancelled", "unknown", "unconfirmed"}:
-            notify_status(config.telegram_to, f"⚠️ Order stopped: status {state}; no automatic replacement was made.")
-            return {"status": state, "attempts": attempt, "history": history, "cron_created": False}
+            notify_status(config.notify_to, f"⚠️ Order stopped: status {state}; no automatic replacement was made.")
+            return {"status": state, "attempts": attempt, "history": history, "fill_report_scheduled": False}
         if state not in {"confirmed", "queued", "new"}:
-            notify_status(config.telegram_to, f"⚠️ Order stopped: broker status {state}; no automatic replacement was made.")
-            return {"status": state, "attempts": attempt, "history": history, "cron_created": False}
+            notify_status(config.notify_to, f"⚠️ Order stopped: broker status {state}; no automatic replacement was made.")
+            return {"status": state, "attempts": attempt, "history": history, "fill_report_scheduled": False}
         cancelled = cancel(config, order_id)
         if str(cancelled.get("state", "")).lower() != "cancelled":
             raise LifecycleError(f"Replacement blocked; cancellation state is {cancelled.get('state')}")
         if attempt == config.max_attempts:
-            notify_status(config.telegram_to, "⏹️ Order stopped after the configured replacement limit; no fill.")
-            return {"status": "attempt_limit", "attempts": attempt, "history": history, "cron_created": False}
+            notify_status(config.notify_to, "⏹️ Order stopped after the configured replacement limit; no fill.")
+            return {"status": "attempt_limit", "attempts": attempt, "history": history, "fill_report_scheduled": False}
         quote_data = call_mcp("get_option_quotes", {"instrument_ids": [current_review["legs"][0]["option_id"]]})
         quote = (quote_data.get("results") or [{}])[0].get("quote", {})
         price = replacement_price(current_review, quote, config.replacement_step)
@@ -350,7 +411,9 @@ def run(reviewed: dict[str, Any], config: Config, sleep_fn: Callable[[float], No
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--reviewed-order", required=True, type=Path)
-    parser.add_argument("--telegram-to", required=True, help="Configured destination, e.g. 8917262950")
+    parser.add_argument("--notify-to", "--telegram-to", dest="notify_to", required=True,
+                        help="Notification destination label for Muse chat delivery "
+                             "(--telegram-to is a legacy alias from the copied source)")
     parser.add_argument("--account-number", required=True)
     parser.add_argument("--max-attempts", type=int, default=3)
     parser.add_argument("--wait-seconds", type=int, default=60)
@@ -363,7 +426,7 @@ def main() -> int:
     args = parse_args()
     try:
         reviewed = json.loads(args.reviewed_order.read_text(encoding="utf-8"))
-        config = Config(args.account_number, args.telegram_to, args.max_attempts, args.wait_seconds, Decimal(args.replacement_step), Decimal(args.min_credit) if args.min_credit else None)
+        config = Config(args.account_number, args.notify_to, args.max_attempts, args.wait_seconds, Decimal(args.replacement_step), Decimal(args.min_credit) if args.min_credit else None)
         result = run(reviewed, config)
         print(json.dumps(result, indent=2))
         return 0
