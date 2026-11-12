@@ -25,8 +25,10 @@ Ledger rules (v1):
   premiums minus total buy premiums over its life.
 - Collateral for a contract = strike x 100 x max simultaneous short
   quantity observed across its fills.
-- YTD percentages: realized / collateral of closed positions;
-  net premiums / total collateral ever committed.
+- YTD percentages (D-33, set by BIG SANDY 2026-11-11): realized and
+  net premiums are both divided by STARTING_CAPITAL_USD — the agentic
+  account's $10,000 seed (cash reconciliation: $14,086.98 cash at the
+  2026-11-11 close = $10,000 + $4,089 net premiums - $2.02 fees).
 - Contracts still open past expiry (assignment/expiry residuals) are
   counted as open; assignments are reported as 0 until an equity
   delivery is observable in the order history (none so far).
@@ -46,6 +48,7 @@ sys.path.insert(0, str(REPO / "scripts"))
 
 PT = ZoneInfo("America/Los_Angeles")
 DEFAULT_ACCOUNT = "858226392"
+STARTING_CAPITAL_USD = 10_000.0  # D-33: YTD % basis — the account's seed capital
 
 
 # ---------------------------------------------------------------- ledger
@@ -255,10 +258,8 @@ def build_report(contracts, day, scores, total_orders, first_fill, last_fill):
     wins = sum(1 for c in closed if c.realized > 0)
     realized_total = sum(c.realized for c in closed)
     net_premiums = sum(c.credits - c.debits for c in upto)
-    closed_coll = sum(c.collateral for c in closed)
-    total_coll = sum(c.collateral for c in upto)
-    rpct = realized_total / closed_coll * 100 if closed_coll else 0.0
-    npct = net_premiums / total_coll * 100 if total_coll else 0.0
+    rpct = realized_total / STARTING_CAPITAL_USD * 100
+    npct = net_premiums / STARTING_CAPITAL_USD * 100
     lines += [f"✅ Closed wins: **{wins}/{len(closed)} · {wins / len(closed) * 100:.0f}%**" if closed else "✅ Closed wins: **0/0**",
               f"🗂️ **{len(upto)} positions · {len(open_)} open · {len(closed)} closed · 0 assignments**",
               f"💰 Realized: **{money(realized_total, signed=True)} ({rpct:.2f}%)**",
@@ -267,8 +268,8 @@ def build_report(contracts, day, scores, total_orders, first_fill, last_fill):
               f"A+ ≥90, A- 80–84.9, B 70–74.9, B- 65–69.9, C+ 60–64.9, C 55–59.9, D+ 45–49.9). "
               f"Ledger reconstructed from the full broker order history of the agentic account "
               f"({total_orders} orders, {first_fill:%b} {first_fill.day} – {last_fill:%b} {last_fill.day}, {last_fill.year}). "
-              f"YTD % basis: realized ÷ collateral committed on closed positions ({money(closed_coll)}); "
-              f"net premiums ÷ total collateral ever committed ({money(total_coll)}).*"]
+              f"YTD % basis: realized ÷ starting capital ({money(STARTING_CAPITAL_USD)} seed); "
+              f"net premiums ÷ starting capital.*"]
     return "\n".join(lines) + "\n"
 
 

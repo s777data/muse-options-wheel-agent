@@ -93,9 +93,11 @@ class LedgerTests(unittest.TestCase):
         self.assertIn("**+$200**", md)
         # YTD: closed FIGR +200, LOSS -50, SCAL +450 -> realized 600, wins 2/3
         self.assertIn("**2/3 · 67%**", md)
-        self.assertIn("**+$600 (", md)
+        # D-33: YTD % are on starting capital ($10,000 seed): 600/10000, 675/10000
+        self.assertIn("**+$600 (6.00%)**", md)
         # net premiums: (390-190)+(100-150)+(400+200-150)+75 = 675
-        self.assertIn("**$675 (", md)
+        self.assertIn("**$675 (6.75%) before fees**", md)
+        self.assertIn("realized ÷ starting capital", md)
 
     def test_no_fills_day_returns_none(self):
         md = dwr.build_report(list(self.contracts.values()), date(2026, 11, 6),

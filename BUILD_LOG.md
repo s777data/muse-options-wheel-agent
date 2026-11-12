@@ -513,3 +513,8 @@
 ## Session 22 — 2026-11-11 (D-32: chat-delivery one-shot paired at placement)
 - BIG SANDY chose the chat-delivery pairing: every future placement step also creates/reuses the one-shot cron `wheel-fill-report-<date>-1305` for the artifact's deliver_after, which posts the code-generated dispatch into the Run-the-wheel chat (with a fallback run of the dispatch script if the OS timer was lost).
 - Dispatch template rewritten to D-31 + D-32 combined mechanism. No code changes (cron creation is agent-side by platform design). No cron created today — no placement pending.
+
+## Session 23 — 2026-11-11 (D-33: YTD % on starting capital)
+- BIG SANDY flagged the 11/11 report's YTD percentages, rejected both collateral bases, and confirmed starting capital as the basis (seed $10,000 by cash reconciliation).
+- `scripts/daily_wheel_report.py`: added `STARTING_CAPITAL_USD`; realized % and net-premiums % both divide by it; footnote restated; docstring updated. `tests/test_daily_wheel_report.py`: YTD assertions now pin exact percentages on the seed. Regenerated outputs/daily-wheel/2026-11-11.{md,png} — Realized 25.78%, Net premiums 40.89%.
+- Suites: daily report 7/7, dispatch 3/3, lifecycle OK. Local-only (outputs never pushed, per standing rule); code/test/log changes unpushed pending BIG SANDY's word.
