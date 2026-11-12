@@ -66,9 +66,19 @@ business:
   net_cash_to_revenue:
     weight: 0.10
     anchors: [[-1.0, 0], [-0.25, 2], [0, 4.5], [0.25, 6.5], [0.5, 8], [1.0, 10]]
-  gross_margin_stdev_5y_pts:
+  # Gross-margin volatility (v5.5, SMCI fix): scored on RELATIVE
+  # volatility — the coefficient of variation stdev(GM 5y) /
+  # max(median(GM 5y), 5.0) — instead of raw percentage-point stdev.
+  # A 2.71 pt swing is CV 0.20 on a ~13.8% hardware margin (SMCI,
+  # score ~5.0) but only CV 0.03 on an 80% software margin (score
+  # ~9.2); the old raw-pts anchors scored both 8.9. Anchors below are
+  # on the CV: 0.05 ≈ a steady compounder, 0.20 ≈ one-fifth-of-level
+  # swings, 0.50+ ≈ margin structure not yet settled. The raw stdev
+  # metric (gross_margin_stdev_5y_pts) is still computed and shown,
+  # and still feeds the Moat leg below, unchanged.
+  gross_margin_relative_volatility:
     weight: 0.10
-    anchors: [[0, 10], [5, 8], [10, 6], [20, 3.5], [30, 1.5], [40, 0]]
+    anchors: [[0, 10], [0.05, 8.5], [0.10, 7], [0.20, 5], [0.35, 3], [0.50, 1.5], [0.75, 0]]
   # Dilution (v3): CAGR of diluted weighted-average shares over the
   # available annual span (up to 5 years). Share count is the one claim
   # on the business that compounds silently — SBC, converts and equity

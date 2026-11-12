@@ -129,15 +129,55 @@ def _debt_families(debt_instants):
     return fams
 
 
+BORROWING_COMPONENT_CLASSES = {"combined_borrowings", "convertible_notes",
+                               "lines_of_credit", "short_term_borrowings"}
+
+
+def _component_sum_at(components, end):
+    """v5.5 component sum at one balance date: for each component
+    class, the total concept when filed, else the sum of whichever of
+    its current / noncurrent lines are filed (the classes are disjoint
+    balance-sheet lines). Returns None unless at least one BORROWING
+    class is present — finance leases alone are not a debt resolution.
+    A class whose filed lines are explicitly 0 contributes 0 and still
+    counts as present: zero is filed data, not missing data."""
+    classes, total, borrowing_found = [], 0.0, False
+    for name, cls in (components or {}).items():
+        tot = _first_at(cls.get("total") or {}, end)
+        if tot:
+            value = tot[1]
+            parts = {"total_concept": tot[0], "total_value": tot[1]}
+        else:
+            cur = _first_at(cls.get("current") or {}, end)
+            non = _first_at(cls.get("noncurrent") or {}, end)
+            if not cur and not non:
+                continue
+            value = (cur[1] if cur else 0) + (non[1] if non else 0)
+            parts = {}
+            if cur:
+                parts.update({"current_concept": cur[0], "current_value": cur[1]})
+            if non:
+                parts.update({"noncurrent_concept": non[0], "noncurrent_value": non[1]})
+        classes.append({"class": name, "value": value, **parts})
+        total += value
+        if name in BORROWING_COMPONENT_CLASSES:
+            borrowing_found = True
+    if classes and borrowing_found:
+        return {"total": total, "classes": classes}
+    return None
+
+
 def resolve_total_debt(debt_instants, fallback_latest=None):
     """Resolve total debt at the latest determinable balance date.
 
     debt_instants: {"totals": {concept: {end: value}},
     "grand_totals": {concept: {end: value}}, "families": {name:
-    {"current": {...}, "noncurrent": {...}}}} as built by
-    edgar.get_company_metrics (a legacy flat {"current", "noncurrent"}
-    map is treated as one family). Dates are tried newest first; at each
-    date (config/sources.yaml documents the priority):
+    {"current": {...}, "noncurrent": {...}}}, "components": {class:
+    {"total": {...}, "current": {...}, "noncurrent": {...}}}} as built
+    by edgar.get_company_metrics (a legacy flat {"current",
+    "noncurrent"} map is treated as one family). Dates are tried
+    newest first; at each date (config/sources.yaml documents the
+    priority):
       (a) a carrying-amount GRAND TOTAL (e.g.
           DebtInstrumentCarryingAmount) wins and REPLACES all
           components — never added to them;
@@ -145,7 +185,15 @@ def resolve_total_debt(debt_instants, fallback_latest=None):
           (bank/debt, notes payable) with both a current and a
           noncurrent value at the date, take the pair sum; families
           coexist on one balance sheet, so the sums add;
-      (c) a single TOTAL concept (first in config list order).
+      (c) a single TOTAL concept (first in config list order);
+      (d) v5.5 COMPONENT SUM (see _component_sum_at): the sum of the
+          disjoint balance-sheet component classes — combined
+          borrowings, convertible notes, lines of credit, short-term
+          borrowings, finance leases — for filers whose borrowings
+          live only under component tags (SMCI: combined-amount loans
+          + convertible senior notes, no aggregate at all). Fires
+          only when (a)-(c) all failed at that date, so a component
+          is never added on top of an aggregate containing it.
     FAIL CLOSED: when nothing resolves, value is None — missing debt
     must never be read as zero debt.
     fallback_latest: {"end", "value"} from the legacy single-concept
@@ -159,11 +207,16 @@ def resolve_total_debt(debt_instants, fallback_latest=None):
     totals = debt_instants.get("totals") or {}
     grand = debt_instants.get("grand_totals") or {}
     fams = _debt_families(debt_instants)
+    components = debt_instants.get("components") or {}
     date_set = {e for by_end in totals.values() for e in by_end}
     date_set |= {e for by_end in grand.values() for e in by_end}
     for cur_map, non_map in fams.values():
         for grp in (cur_map, non_map):
             for by_end in grp.values():
+                date_set |= set(by_end)
+    for cls in components.values():
+        for side_map in cls.values():
+            for by_end in side_map.values():
                 date_set |= set(by_end)
     for end in sorted(date_set, reverse=True):
         gt = _first_at(grand, end)
@@ -198,6 +251,11 @@ def resolve_total_debt(debt_instants, fallback_latest=None):
             return {"value": tot[1], "as_of": end,
                     "method": f"single_total:{tot[0]}",
                     "components": {"concept": tot[0]}}
+        comp = _component_sum_at(components, end)
+        if comp:
+            return {"value": comp["total"], "as_of": end,
+                    "method": "component_sum_fallback",
+                    "components": {"classes": comp["classes"]}}
     return {"value": None, "as_of": None, "method": "not_determinable", "components": {}}
 
 
@@ -255,6 +313,93 @@ def _latest_period_value(period_rows):
     cands.sort(key=lambda r: ((_day(r["end"]) - _day(r["start"])).days,
                               -(date.fromisoformat(r["filed"]).toordinal() if r.get("filed") else 0)))
     return cands[0]["value"]
+
+
+def _split_adjusted_series(rows):
+    """Restate an annual share-count series onto post-split units.
+
+    A step whose ratio is (within 3%) a clean integer factor of 2..25
+    is a stock split whose older filings were never restated (SMCI:
+    FY21 53.5M -> FY22 536.2M, ratio 10.02 — the 10-for-1 split; the
+    FY22+ points were filed post-split in the Feb-2025 10-K while the
+    FY21 point still comes from a pre-split filing). Every point
+    before such a step is scaled by the split factor (the reciprocal
+    for a reverse split) so growth is computed apples-to-apples.
+    Returns (adjusted_rows, split_events, unresolved): unresolved is
+    True when a >5x / <0.2x step is NOT a clean split — a shares-vs-
+    thousands units break runs ~1000x and stays fail-closed, exactly
+    as before."""
+    rows = sorted((r for r in rows if r.get("value")), key=lambda r: r["end"])
+    scales = [1.0] * len(rows)
+    events, unresolved = [], False
+    cum = 1.0
+    for i in range(len(rows) - 1, 0, -1):
+        a, b = rows[i - 1]["value"], rows[i]["value"]
+        if a > 0:
+            ratio = b / a
+            if ratio > 5 or ratio < 0.2:
+                if ratio > 1:
+                    k = round(ratio)
+                    clean = 2 <= k <= 25 and abs(ratio - k) / k <= 0.03
+                    step = float(k)
+                else:
+                    k = round(1 / ratio)
+                    clean = 2 <= k <= 25 and abs(ratio - 1 / k) / (1 / k) <= 0.03
+                    step = 1.0 / k
+                if clean:
+                    cum *= step
+                    events.append({"first_post_split_end": rows[i]["end"],
+                                   "factor": step})
+                else:
+                    unresolved = True
+        scales[i - 1] = cum
+    adjusted = [dict(r, value=r["value"] * s) for r, s in zip(rows, scales)]
+    if not unresolved:
+        unresolved = any(
+            (b["value"] / a["value"] > 5 or b["value"] / a["value"] < 0.2)
+            for a, b in zip(adjusted, adjusted[1:]) if a["value"] > 0)
+    return adjusted, events, unresolved
+
+
+def _quarterly_share_yoy(period_rows):
+    """YoY growth of the diluted share count from standalone quarters:
+    the latest single quarter (60-115 day duration) against the
+    quarter ending 300-430 days before it, with the same clean-split
+    adjustment as the annual path. None when either point is absent."""
+    by_end = {}
+    for r in period_rows or []:
+        dur = (_day(r["end"]) - _day(r["start"])).days
+        if not (60 <= dur <= 115):
+            continue
+        cur = by_end.get(r["end"])
+        if cur is None or (r.get("filed") or "") > (cur.get("filed") or ""):
+            by_end[r["end"]] = r
+    if not by_end:
+        return None
+    latest_end = max(by_end)
+    latest = by_end[latest_end]["value"]
+    cands = [r for e, r in by_end.items()
+             if 300 <= (_day(latest_end) - _day(e)).days <= 430]
+    if not cands or not latest:
+        return None
+    prior_row = min(cands, key=lambda r: abs(
+        (_day(latest_end) - _day(r["end"])).days - 365))
+    prior = prior_row["value"]
+    if not prior or prior <= 0:
+        return None
+    ratio = latest / prior
+    if ratio > 5 or ratio < 0.2:
+        if ratio > 1:
+            k = round(ratio)
+            if not (2 <= k <= 25 and abs(ratio - k) / k <= 0.03):
+                return None
+            prior = prior * k
+        else:
+            k = round(1 / ratio)
+            if not (2 <= k <= 25 and abs(ratio - 1 / k) / (1 / k) <= 0.03):
+                return None
+            prior = prior / k
+    return (latest / prior - 1) * 100
 
 
 def compute_metrics(series, tax_rate_pct, inflection_cfg=None):
@@ -455,6 +600,22 @@ def compute_metrics(series, tax_rate_pct, inflection_cfg=None):
     out["gross_margin_latest_pct"] = gm_vals[-1] if gm_vals else None
     out["gross_margin_median_5y_pct"] = _median_last(gm_vals)
     out["gross_margin_stdev_5y_pts"] = statistics.pstdev(gm_vals[-5:]) if len(gm_vals) >= 3 else None
+    # Relative gross-margin volatility (v5.5): the coefficient of
+    # variation of the 5-year gross-margin series — stdev normalised
+    # by the margin LEVEL (floored at 5 pts so a near-zero median
+    # cannot explode the ratio). Raw point stdev treats a 2.71 pt
+    # swing on SMCI's ~13.8% hardware margin (CV 0.20) as far safer
+    # than the same swing on an 80% software margin (CV 0.03); the
+    # Business score now reads the relative figure. The raw stdev
+    # above stays as the disclosed display value (and still feeds the
+    # Moat leg and the fungibility flag, unchanged).
+    if out["gross_margin_stdev_5y_pts"] is not None \
+            and out["gross_margin_median_5y_pct"] is not None:
+        out["gross_margin_relative_volatility"] = (
+            out["gross_margin_stdev_5y_pts"]
+            / max(out["gross_margin_median_5y_pct"], 5.0))
+    else:
+        out["gross_margin_relative_volatility"] = None
     om_vals = [v for _, v in om_series]
     out["operating_margin_median_5y_pct"] = _median_last(om_vals)
     out["fcf_margin_median_5y_pct"] = _median_last([v for _, v in fcfm_series])
@@ -559,15 +720,26 @@ def compute_metrics(series, tax_rate_pct, inflection_cfg=None):
         out["net_cash_to_revenue"] = out["net_cash_latest"] / rev_snapshot if rev_snapshot else None
         out["leverage_debt_to_revenue_ttm"] = debt / rev_snapshot if rev_snapshot else None
     # Interest coverage on the same TTM bridge as the other trailing
-    # figures. Missing (renormalised) when interest expense is absent or
-    # non-positive — a filer with no interest-bearing debt is not awarded
-    # a free perfect score.
+    # figures. The denominator is GROSS interest expense TTM — the
+    # interest_expense concept list in config/sources.yaml contains
+    # gross tags only, and interest income is never netted against it
+    # (v5.5, SMCI fix: a net denominator collapses toward zero when
+    # interest income on cash nearly offsets the gross expense, and
+    # manufactured a 235.59x coverage print). The raw ratio is capped
+    # at 100.0 for scoring/display, with the uncapped figure kept in
+    # interest_coverage_ttm_uncapped for audit. Missing (renormalised)
+    # when interest expense is absent or non-positive — a filer with
+    # no interest-bearing debt is not awarded a free perfect score
+    # (V5.4 Exception 1).
     oi_t, ie_t = out.get("operating_income_ttm"), out.get("interest_expense_ttm")
     if oi_t is not None and ie_t is not None and ie_t > 0:
-        out["interest_coverage_ttm"] = oi_t / ie_t
+        uncapped = oi_t / ie_t
+        out["interest_coverage_ttm_uncapped"] = uncapped
+        out["interest_coverage_ttm"] = min(uncapped, 100.0)
         out["interest_coverage_missing_reason"] = None
     else:
         out["interest_coverage_ttm"] = None
+        out["interest_coverage_ttm_uncapped"] = None
         out["interest_coverage_missing_reason"] = (
             "operating_income_ttm_missing" if oi_t is None else
             "interest_expense_ttm_missing_or_nonpositive")
@@ -589,32 +761,62 @@ def compute_metrics(series, tax_rate_pct, inflection_cfg=None):
     # Dilution: CAGR of the annual diluted weighted-average share count
     # over the available span, up to 5 years back from the latest annual
     # point. Needs >= 2 annual points; with exactly 2 it is the 1-year
-    # growth rate. Missing (renormalised) below that — never guessed.
+    # growth rate. Fallback chain (v5.5): (1) the annual CAGR on the
+    # SPLIT-ADJUSTED series — a clean integer split step (SMCI's
+    # 10-for-1) is restated onto post-split units instead of failing
+    # the leg closed, while a non-split break (units error, ~1000x)
+    # still fails closed; (2) when the annual path yields nothing, the
+    # YoY growth of the latest standalone quarter vs the year-ago
+    # quarter (Q_t vs Q_{t-4}) from the period rows. Missing below
+    # that — never guessed — and a data-quality warning is recorded
+    # whenever the leg stays missing (under V5.4 it then zero-scores
+    # at full weight in Business; it is never silently renormalised
+    # away without the warning).
     share_rows = [r for r in series.get("diluted_shares", []) if r.get("value")]
     dil_pct, dil_span, dil_points = None, None, len(share_rows)
     dil_discontinuity = False
+    dil_method, split_events = None, []
     if len(share_rows) >= 2:
-        latest_row = share_rows[-1]
-        cutoff = _day(latest_row["end"]).toordinal() - int(5 * 365.25)
-        window = [r for r in share_rows if _day(r["end"]).toordinal() >= cutoff]
-        # Continuity guard: a >5x (or <0.2x) single-year jump in the
-        # filed share series is a split that older filings never
-        # restated, or a units break in the newest filing (shares vs
-        # thousands) — not dilution or buybacks. Fail closed: dilution
-        # goes missing and is flagged rather than scored off the break.
-        dil_discontinuity = any(
-            (b["value"] / a["value"] > 5 or b["value"] / a["value"] < 0.2)
-            for a, b in zip(window, window[1:]) if a["value"] > 0)
-        earliest_row = window[0]
-        span_days = (_day(latest_row["end"]) - _day(earliest_row["end"])).days
-        if not dil_discontinuity and span_days > 0 and earliest_row["value"] > 0:
-            dil_span = span_days / 365.25
-            dil_pct = ((latest_row["value"] / earliest_row["value"]) ** (1 / dil_span) - 1) * 100
-            dil_points = len(window)
+        # Split adjustment runs on the scoring window only (the last
+        # ~5 years), matching the old continuity guard's scope: an
+        # ancient break outside the window never blocked the leg.
+        raw_latest = max(share_rows, key=lambda r: r["end"])
+        cutoff = _day(raw_latest["end"]).toordinal() - int(5 * 365.25)
+        window_raw = [r for r in share_rows
+                      if _day(r["end"]).toordinal() >= cutoff]
+        window, split_events, unresolved = _split_adjusted_series(window_raw)
+        latest_row = window[-1] if window else raw_latest
+        dil_discontinuity = unresolved
+        if not unresolved and len(window) >= 2:
+            earliest_row = window[0]
+            span_days = (_day(latest_row["end"]) - _day(earliest_row["end"])).days
+            if span_days > 0 and earliest_row["value"] > 0:
+                dil_span = span_days / 365.25
+                dil_pct = ((latest_row["value"] / earliest_row["value"]) ** (1 / dil_span) - 1) * 100
+                dil_points = len(window)
+                dil_method = "annual_cagr_split_adjusted" if split_events else "annual_cagr"
+    q_yoy = _quarterly_share_yoy(periods.get("diluted_shares"))
+    if dil_pct is None and q_yoy is not None:
+        dil_pct, dil_span, dil_points = q_yoy, 1.0, 2
+        dil_method = "quarterly_yoy_fallback"
+        dil_discontinuity = False
     out["dilution_share_count_growth_pct"] = dil_pct
     out["dilution_span_years"] = round(dil_span, 2) if dil_span is not None else None
     out["dilution_annual_points"] = dil_points if dil_pct is not None else None
     out["dilution_share_series_discontinuity"] = dil_discontinuity
+    out["dilution_method"] = dil_method
+    out["dilution_split_adjustments"] = split_events
+    out["dilution_quarterly_yoy_pct"] = q_yoy
+    if dil_pct is None:
+        reason = ("share_series_discontinuity_not_a_split" if dil_discontinuity
+                  else "fewer_than_two_share_points_and_no_quarterly_pair"
+                  if share_rows else "no_diluted_share_series_any_fallback")
+        out["dilution_data_quality_warning"] = (
+            f"dilution_share_count_growth_pct missing ({reason}); all "
+            "share-count fallbacks exhausted — Business leg zero-scores "
+            "at full weight under the V5.4 missing policy")
+    else:
+        out["dilution_data_quality_warning"] = None
 
     # Through-cycle ROIC: operating income after config tax, over invested
     # capital (equity + debt - cash - investments), aligned per year, median.

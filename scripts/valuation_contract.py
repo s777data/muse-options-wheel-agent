@@ -5,14 +5,14 @@ copy its contract.py. It validates the dashboard-derived response objects
 produced by scripts/valuation_scorer.py before Phase 6 consumes them.
 
 contract_version:    "1.0-wheel.1"
-methodology_version: "dashboard-v5.4+gav-code"
+methodology_version: "dashboard-v5.5+gav-code"
 """
 from __future__ import annotations
 
 import math
 
 CONTRACT_VERSION = "1.0-wheel.1"
-METHODOLOGY_VERSION = "dashboard-v5.4+gav-code"
+METHODOLOGY_VERSION = "dashboard-v5.5+gav-code"
 CONFIDENCE_LEVELS = {"high", "medium", "low", "insufficient"}
 
 

@@ -75,11 +75,44 @@ concepts:
   total_debt_noncurrent: ["LongTermDebtNoncurrent", "DebtNoncurrent", "LongTermBorrowingsNoncurrent"]
   total_notes_current: ["NotesPayableCurrent"]
   total_notes_noncurrent: ["LongTermNotesPayable", "NotesPayableNoncurrent"]
+  # COMPONENT-SUM FALLBACK (v5.5, SMCI fix): when NO aggregate resolves
+  # at a balance date — no grand total, no family pair, no single total
+  # — total debt is the sum of the balance-sheet component classes
+  # below (metrics.resolve_total_debt step (d)). The classes are
+  # disjoint balance-sheet lines, so they add without double counting;
+  # the fallback never fires when an aggregate exists at the date (an
+  # aggregate already contains its components). Super Micro files its
+  # borrowings exactly this way: term loans / credit facility only as
+  # DebtLongtermAndShorttermCombinedAmount and its convertible senior
+  # notes only as ConvertibleLongTermNotesPayable — neither was in any
+  # list above, so its debt resolved to a stale $120M LongTermDebt row
+  # from FY2023 while it actually carried ~$8.6B. A finance-lease class
+  # alone never triggers the fallback (leases alone are not a debt
+  # resolution); at least one borrowing class must be present.
+  debt_component_combined_total: ["DebtLongtermAndShorttermCombinedAmount"]
+  debt_component_convertible_current: ["ConvertibleNotesPayableCurrent", "ConvertibleDebtCurrent", "DebtConvertibleCurrent"]
+  debt_component_convertible_noncurrent: ["ConvertibleLongTermNotesPayable", "ConvertibleNotesPayableNoncurrent", "ConvertibleDebtNoncurrent", "DebtConvertibleNoncurrent"]
+  debt_component_loc_total: ["LineOfCredit"]
+  debt_component_loc_current: ["LineOfCreditCurrent"]
+  debt_component_loc_noncurrent: ["LineOfCreditNoncurrent"]
+  debt_component_short_term: ["ShortTermBorrowings"]
+  debt_component_finance_lease_total: ["FinanceLeaseLiability"]
+  debt_component_finance_lease_current: ["FinanceLeaseLiabilityCurrent"]
+  debt_component_finance_lease_noncurrent: ["FinanceLeaseLiabilityNoncurrent"]
   # Finance-lease and operating-lease liabilities are NOT added to total
   # debt: several total concepts above already embed capital/finance
   # leases, so adding lease liabilities would double count. The exclusion
   # is flagged in every run's data_quality.
-  interest_expense: ["InterestExpense", "InterestExpenseDebt", "InterestAndDebtExpense"]
+  # Interest expense is GROSS interest expense ONLY (v5.5, SMCI fix).
+  # InterestExpenseNonoperating added: Super Micro tags its gross
+  # interest there ($194.6M FY26) while the plain InterestExpense tag
+  # carries only a stale, small loans-only series (to Mar 2024) — the
+  # freshest-series pick therefore built coverage on ~$19.7M TTM and
+  # printed 235.59x. NET interest concepts (InterestIncomeExpenseNet
+  # and kin) must NEVER be added here: when interest income on cash
+  # nearly offsets gross expense, a net denominator collapses toward
+  # zero and manufactures coverage a levered filer does not have.
+  interest_expense: ["InterestExpense", "InterestExpenseDebt", "InterestExpenseNonoperating", "InterestExpenseOperating", "InterestAndDebtExpense"]
   # Stock-based compensation (the cash-flow-statement add-back line).
   # ShareBasedCompensation is attested for every scored filer in the set
   # (checked 2026-11-07 against companyfacts); AllocatedShareBased-
@@ -106,7 +139,13 @@ concepts:
   # authorized / remaining figures are NOT in XBRL; they come from
   # the periodic filing text (src/evaluator/buybacks.py).
   share_repurchases: ["PaymentsForRepurchaseOfCommonStock", "PaymentsForRepurchaseOfEquity", "StockRepurchasedAndRetiredDuringPeriodValue"]
-  diluted_shares: ["WeightedAverageNumberOfDilutedSharesOutstanding"]
+  # Diluted share count fallback chain (v5.5): the two attested us-gaap
+  # orderings of the diluted weighted-average tag. If neither yields a
+  # series, edgar falls back in order to class-share filing text, then
+  # basic shares (loss-makers, ASC 260), then the point-in-time
+  # shares_outstanding balance count below — see edgar.py.
+  diluted_shares: ["WeightedAverageNumberOfDilutedSharesOutstanding", "WeightedAverageNumberOfSharesOutstandingDiluted"]
+  shares_outstanding: ["CommonStockSharesOutstanding"]
   eps_diluted: ["EarningsPerShareDiluted"]
   rd_expense: ["ResearchAndDevelopmentExpense"]
   equity: ["StockholdersEquity"]

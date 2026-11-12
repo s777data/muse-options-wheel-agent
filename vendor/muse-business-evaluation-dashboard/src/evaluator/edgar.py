@@ -122,7 +122,36 @@ DEBT_FAMILIES = (("bank_debt", "total_debt_current", "total_debt_noncurrent"),
                  ("notes_payable", "total_notes_current", "total_notes_noncurrent"))
 DEBT_COMPONENT_KEYS = {"total_debt_current", "total_debt_noncurrent",
                        "total_notes_current", "total_notes_noncurrent",
-                       "total_debt_grand_total"}
+                       "total_debt_grand_total",
+                       "debt_component_combined_total",
+                       "debt_component_convertible_current",
+                       "debt_component_convertible_noncurrent",
+                       "debt_component_loc_total",
+                       "debt_component_loc_current",
+                       "debt_component_loc_noncurrent",
+                       "debt_component_short_term",
+                       "debt_component_finance_lease_total",
+                       "debt_component_finance_lease_current",
+                       "debt_component_finance_lease_noncurrent",
+                       "shares_outstanding"}
+
+# v5.5 component-sum fallback classes: (class name, total key, current
+# key, noncurrent key) into config/sources.yaml concepts. The classes
+# are disjoint balance-sheet lines; metrics.resolve_total_debt sums
+# them ONLY at a date where no aggregate (grand total / family pair /
+# single total) resolved, so a component is never added on top of an
+# aggregate that already contains it.
+DEBT_COMPONENT_CLASSES = (
+    ("combined_borrowings", "debt_component_combined_total", None, None),
+    ("convertible_notes", None, "debt_component_convertible_current",
+     "debt_component_convertible_noncurrent"),
+    ("lines_of_credit", "debt_component_loc_total",
+     "debt_component_loc_current", "debt_component_loc_noncurrent"),
+    ("short_term_borrowings", "debt_component_short_term", None, None),
+    ("finance_leases", "debt_component_finance_lease_total",
+     "debt_component_finance_lease_current",
+     "debt_component_finance_lease_noncurrent"),
+)
 
 
 # v5 verified-zero debt: the debt resolver fails closed when no debt can
@@ -132,7 +161,17 @@ DEBT_COMPONENT_KEYS = {"total_debt_current", "total_debt_noncurrent",
 # zero ONLY on positive evidence from the raw companyfacts:
 DEBT_CONCEPT_KEYS = ("total_debt", "total_debt_grand_total",
                      "total_debt_current", "total_debt_noncurrent",
-                     "total_notes_current", "total_notes_noncurrent")
+                     "total_notes_current", "total_notes_noncurrent",
+                     "debt_component_combined_total",
+                     "debt_component_convertible_current",
+                     "debt_component_convertible_noncurrent",
+                     "debt_component_loc_total",
+                     "debt_component_loc_current",
+                     "debt_component_loc_noncurrent",
+                     "debt_component_short_term",
+                     "debt_component_finance_lease_total",
+                     "debt_component_finance_lease_current",
+                     "debt_component_finance_lease_noncurrent")
 
 
 def verified_zero_debt_evidence(facts, sources_cfg):
@@ -442,12 +481,31 @@ def get_company_metrics(sources_cfg, cik):
             fam[side] = per_concept
         families[fam_name] = fam
     debt_instants["families"] = families
+    # v5.5: component classes for the component-sum fallback in
+    # metrics.resolve_total_debt (step (d)) — same instant shape.
+    components = {}
+    for class_name, total_key, cur_key, non_key in DEBT_COMPONENT_CLASSES:
+        cls = {}
+        for side, key in (("total", total_key), ("current", cur_key),
+                          ("noncurrent", non_key)):
+            if key is None:
+                cls[side] = {}
+                continue
+            per_concept = {}
+            for concept in sources_cfg["concepts"].get(key, []):
+                inst = _instants_by_end(_unit_rows(facts, concept, "total_debt"))
+                if inst:
+                    per_concept[concept] = inst
+            cls[side] = per_concept
+        components[class_name] = cls
+    debt_instants["components"] = components
     series["_debt_instants"] = debt_instants
     series["_verified_zero_debt"] = verified_zero_debt_evidence(facts, sources_cfg)
     series["_periods"] = periods
     series["_balance_latest"] = balance_latest
     apply_class_share_fallback(series, periods, sources_cfg, cik)
     apply_basic_shares_fallback(series, periods, facts, sources_cfg)
+    apply_shares_outstanding_fallback(series, periods, facts, sources_cfg)
     return facts.get("entityName"), series
 
 
@@ -500,6 +558,47 @@ def apply_basic_shares_fallback(series, periods, facts, sources_cfg):
                       "latest_annual_end": ni[-1]["end"],
                       "basis": "asc_260_antidilution_loss_maker_diluted_equals_basic"}
     series["_basic_shares_fallback"] = provenance
+    return provenance
+
+
+def apply_shares_outstanding_fallback(series, periods, facts, sources_cfg):
+    """Point-in-time shares-outstanding fallback (v5.5): the LAST rung
+    of the diluted share count chain, used only when no weighted-
+    average diluted series exists in any form (companyfacts diluted
+    tags, class-share filing text, and the basic-shares fallback all
+    failed). CommonStockSharesOutstanding is a balance-sheet instant
+    (shares issued and outstanding at the period end), not a weighted
+    average — it is a coarser input, so it fires only as a last resort
+    and is flagged in series["_shares_outstanding_fallback"]. Annual
+    points are the 10-K / FY instant rows, shaped like an annual
+    series so market cap, per-share bases and the dilution CAGR
+    downstream work unchanged. Instant rows carry no duration, so no
+    period rows are produced (the quarterly dilution fallback simply
+    stays unavailable for such a filer)."""
+    provenance = {"applied": False}
+    if series.get("diluted_shares"):
+        series["_shares_outstanding_fallback"] = provenance
+        return provenance
+    by_end = {}
+    for concept in sources_cfg["concepts"].get("shares_outstanding", []):
+        for row in _unit_rows(facts, concept, "diluted_shares"):
+            if row.get("form") != "10-K" or row.get("fp") != "FY" \
+                    or row.get("start"):
+                continue
+            end = row["end"]
+            if end not in by_end or row.get("filed", "") > by_end[end].get("filed", ""):
+                by_end[end] = row
+    if not by_end:
+        provenance["reason"] = "no_shares_outstanding_series"
+        series["_shares_outstanding_fallback"] = provenance
+        return provenance
+    series["diluted_shares"] = [
+        {"end": e, "value": by_end[e]["val"], "filed": by_end[e].get("filed")}
+        for e in sorted(by_end)]
+    provenance = {"applied": True,
+                  "concept": "CommonStockSharesOutstanding",
+                  "basis": "point_in_time_balance_sheet_share_count_last_resort"}
+    series["_shares_outstanding_fallback"] = provenance
     return provenance
 
 
