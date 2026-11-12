@@ -518,3 +518,7 @@
 - BIG SANDY flagged the 11/11 report's YTD percentages, rejected both collateral bases, and confirmed starting capital as the basis (seed $10,000 by cash reconciliation).
 - `scripts/daily_wheel_report.py`: added `STARTING_CAPITAL_USD`; realized % and net-premiums % both divide by it; footnote restated; docstring updated. `tests/test_daily_wheel_report.py`: YTD assertions now pin exact percentages on the seed. Regenerated outputs/daily-wheel/2026-11-11.{md,png} — Realized 25.78%, Net premiums 40.89%.
 - Suites: daily report 7/7, dispatch 3/3, lifecycle OK. Local-only (outputs never pushed, per standing rule); code/test/log changes unpushed pending BIG SANDY's word.
+
+## Session 24 — 2026-11-11 (D-34: collateral counts every opening — tree made clean)
+- At BIG SANDY's word, the working-tree collateral change found during the D-33 push is committed on its own: `collateral = strike x 100 x total_opened` (was peak `max_short`), RCLD fixture + `test_collateral_counts_every_opening` included. Verified the remote-vs-local diff was exactly this change and nothing else before pushing.
+- Suites: daily report 7/7. After this push the working tree and remote agree on the daily-report files.

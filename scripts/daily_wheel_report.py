@@ -23,8 +23,10 @@ Ledger rules (v1):
 - A position is one contract (symbol, type, strike, expiry). Realized
   P&L is recognized when the position returns to zero, as total sell
   premiums minus total buy premiums over its life.
-- Collateral for a contract = strike x 100 x max simultaneous short
-  quantity observed across its fills.
+- Collateral for a contract = strike x 100 x total contracts opened
+  (every sell-open fill, including a contract re-opened after a partial
+  close — the premium numerator counts every opening, so the
+  denominator must too).
 - YTD percentages (D-33, set by BIG SANDY 2026-11-11): realized and
   net premiums are both divided by STARTING_CAPITAL_USD — the agentic
   account's $10,000 seed (cash reconciliation: $14,086.98 cash at the
@@ -103,8 +105,13 @@ class Contract:
         return max((-pos for _, pos in self._walk()), default=0.0)
 
     @property
+    def total_opened(self):
+        return sum(f.qty for f in self.fills
+                   if f.side == "sell" and f.effect == "open")
+
+    @property
     def collateral(self):
-        return self.strike * 100 * self.max_short
+        return self.strike * 100 * self.total_opened
 
     @property
     def is_closed(self):

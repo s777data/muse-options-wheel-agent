@@ -43,6 +43,13 @@ class LedgerTests(unittest.TestCase):
             order("2026-10-01", "SCAL", 10, "2026-11-20", "sell", "open", 2, 2.00, 400),
             order("2026-10-02", "SCAL", 10, "2026-11-20", "sell", "open", 1, 2.00, 200),
             order("2026-10-20", "SCAL", 10, "2026-11-20", "buy", "close", 3, 0.50, 150),
+            # RCLD $7.50P (ALHC pattern): sell 2, sell 1, BTC 1, sell 2, BTC 4
+            # peak short 4 but 5 contracts opened -> collateral 5 x 750 = 3750
+            order("2026-08-10", "RCLD", 7.5, "2026-11-20", "sell", "open", 2, 1.00, 200),
+            order("2026-08-11", "RCLD", 7.5, "2026-11-20", "sell", "open", 1, 1.00, 100),
+            order("2026-08-20", "RCLD", 7.5, "2026-11-20", "buy", "close", 1, 0.50, 50),
+            order("2026-08-25", "RCLD", 7.5, "2026-11-20", "sell", "open", 2, 1.00, 200),
+            order("2026-09-05", "RCLD", 7.5, "2026-11-20", "buy", "close", 4, 0.50, 200),
             # a cancelled order must be ignored
             {**order("2026-11-11", "OPEN", 4, "2026-12-18", "sell", "open", 1, 0.25, 25),
              "state": "cancelled"},
@@ -73,6 +80,15 @@ class LedgerTests(unittest.TestCase):
         self.assertEqual(c.collateral, 3000)
         self.assertEqual(c.realized, 450)
 
+    def test_collateral_counts_every_opening(self):
+        # Recycled contract: peak short 4, but 5 opened — collateral must
+        # count all 5 so the denominator matches the premium numerator.
+        c = self.contracts["RCLD"]
+        self.assertEqual(c.max_short, 4)
+        self.assertEqual(c.total_opened, 5)
+        self.assertEqual(c.collateral, 3750)
+        self.assertTrue(c.is_closed)
+
     def test_letter_bands(self):
         self.assertEqual(dwr.letter(96.0), "A+")
         self.assertEqual(dwr.letter(83.43), "A-")
@@ -91,12 +107,12 @@ class LedgerTests(unittest.TestCase):
         self.assertIn("Sell 3 @ $0.25", md)
         self.assertIn("BTC 2 @ $0.95", md)
         self.assertIn("**+$200**", md)
-        # YTD: closed FIGR +200, LOSS -50, SCAL +450 -> realized 600, wins 2/3
-        self.assertIn("**2/3 · 67%**", md)
-        # D-33: YTD % are on starting capital ($10,000 seed): 600/10000, 675/10000
-        self.assertIn("**+$600 (6.00%)**", md)
-        # net premiums: (390-190)+(100-150)+(400+200-150)+75 = 675
-        self.assertIn("**$675 (6.75%) before fees**", md)
+        # YTD: closed FIGR +200, LOSS -50, SCAL +450, RCLD +250 -> realized 850, wins 3/4
+        self.assertIn("**3/4 · 75%**", md)
+        # D-33: YTD % are on starting capital ($10,000 seed): 850/10000, 925/10000
+        self.assertIn("**+$850 (8.50%)**", md)
+        # net premiums: (390-190)+(100-150)+(400+200-150)+(200+100+200-50-200)+75 = 925
+        self.assertIn("**$925 (9.25%) before fees**", md)
         self.assertIn("realized ÷ starting capital", md)
 
     def test_no_fills_day_returns_none(self):
