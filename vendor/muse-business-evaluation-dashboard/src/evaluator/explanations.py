@@ -9,6 +9,9 @@ def _top_bottom(subs, n=2):
 
 
 def _fmt(metric, entry):
+    if entry.get("zero_scored_missing"):
+        return (f"{metric.replace('_', ' ')} scored {entry['score']}/10 "
+                f"(missing — scored 0 under the missing-leg policy)")
     return f"{metric.replace('_', ' ')} scored {entry['score']}/10 (value {entry['value']})"
 
 
@@ -21,8 +24,12 @@ def leverage_note(scored):
     for key, label in (("leverage_debt_to_revenue_ttm", "Debt-to-TTM-revenue leverage"),
                        ("interest_coverage_ttm", "Interest coverage")):
         entry = subs.get(key)
-        if entry:
+        if entry and entry.get("value") is not None:
             parts.append(f"{label} scored {entry['score']}/10 (value {entry['value']})")
+        elif entry and entry.get("zero_scored_missing"):
+            parts.append(f"{label} scored 0/10 (missing — filed debt or interest "
+                         f"data could not be determined, scored 0 under the "
+                         f"Business missing-leg policy)")
     if parts:
         return " " + " and ".join(parts) + "."
     return (" Leverage checks (debt-to-TTM-revenue and interest coverage) were "
@@ -36,14 +43,18 @@ def dilution_note(scored, metrics):
     subs = scored.get("subscores", {})
     entry = subs.get("dilution_share_count_growth_pct")
     parts = []
-    if entry:
+    if entry and entry.get("value") is not None:
         span = metrics.get("dilution_span_years")
         parts.append(f"Diluted share count changed {entry['value']:+}%/yr"
                      + (f" over {span} years" if span else "")
                      + f", scored {entry['score']}/10")
+    elif entry and entry.get("zero_scored_missing"):
+        parts.append("Dilution sub-score was missing — scored 0 under the "
+                     "Business missing-leg policy")
     if metrics.get("sbc_not_reported_fcf_unadjusted_not_used"):
         parts.append("no stock-based compensation was reported, so the FCF margin "
-                     "sub-score was excluded rather than computed on unadjusted FCF")
+                     "sub-score was not computed on unadjusted FCF (missing — "
+                     "scored 0 under the Business missing-leg policy)")
     elif metrics.get("sbc_pct_of_revenue_latest") is not None:
         parts.append(f"FCF is SBC-adjusted owner FCF (stock comp was "
                      f"{metrics['sbc_pct_of_revenue_latest']:.1f}% of revenue in the latest year)")

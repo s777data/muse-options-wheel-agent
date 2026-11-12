@@ -1,7 +1,26 @@
 """Config-driven piecewise scoring. The ONLY math here is interpolation
 between the anchor points in config/scoring.yaml and a weighted mean.
 Missing metrics are excluded and the remaining weights renormalised;
-every exclusion is reported by the caller in data_quality."""
+every exclusion is reported by the caller in data_quality.
+
+Missing-policy (V5.4, config/scoring.yaml `missing_policy`, set by
+BIG SANDY 2026-11-11 from the ANGX check): a section or an individual
+metric can instead be scored 0 at its full weight when missing. The
+Business section uses this for every leg — no Business leg is
+optional — with exactly two exceptions he approved: interest
+coverage stays renormalised when it is missing because the filer
+reports no interest expense (there is nothing to cover), and the
+net-cash / leverage legs stay renormalised when debt cannot be
+determined from the filings (fail-closed stays fail-closed; the
+zero is a policy score for a missing leg, never an invented debt
+figure). In Value the zero treatment is optional and applies only
+to the trailing P/E and FCF-yield legs when they are missing
+because the filer is not profitable; the DCF and buyback legs
+still renormalise. A zero-scored leg stays in `missing_metrics`
+(it WAS missing) and is additionally listed in
+`zero_scored_missing_metrics`, with its sub-score entry carrying
+`zero_scored_missing: True` and value None — the missing state is
+disclosed, never disguised as filed data."""
 
 
 def interpolate(value, anchors):
@@ -18,12 +37,34 @@ def interpolate(value, anchors):
     return pts[-1][1]
 
 
-def score_section(section_cfg, metric_values):
-    subs, missing, weight_sum = {}, [], 0.0
+def score_section(section_cfg, metric_values, missing_as_zero=False, zero_metrics=None,
+                  zero_exclude_metrics=None):
+    """Weighted mean of a section's sub-scores.
+
+    Default (pre-V5.4) behaviour: a missing metric is excluded and the
+    remaining weights renormalise. With `missing_as_zero` every missing
+    metric scores 0 at its full weight; with `zero_metrics` (a set of
+    metric names) only those missing metrics score 0 and the rest still
+    renormalise. `zero_exclude_metrics` names exceptions: those missing
+    metrics renormalise even under `missing_as_zero` (the caller decides
+    eligibility from the missing reason — see run.py's Business
+    policy). Zero-scored metrics keep their weight in the denominator,
+    so `weights_renormalised_over` then counts them too.
+    """
+    zero_metrics = set(zero_metrics or ())
+    zero_exclude_metrics = set(zero_exclude_metrics or ())
+    subs, missing, zeroed, weight_sum = {}, [], [], 0.0
     for metric, spec in section_cfg.items():
         value = metric_values.get(metric)
         if value is None:
             missing.append(metric)
+            if (missing_as_zero or metric in zero_metrics) \
+                    and metric not in zero_exclude_metrics:
+                subs[metric] = {"value": None, "score": 0.0,
+                                "weight": spec["weight"],
+                                "zero_scored_missing": True}
+                zeroed.append(metric)
+                weight_sum += spec["weight"]
             continue
         score = interpolate(float(value), spec["anchors"])
         subs[metric] = {"value": round(float(value), 4), "score": round(score, 3),
@@ -33,7 +74,67 @@ def score_section(section_cfg, metric_values):
     if weight_sum:
         total = sum(s["score"] * s["weight"] for s in subs.values()) / weight_sum
     return {"subscores": subs, "total": round(total, 2) if total is not None else None,
-            "missing_metrics": missing, "weights_renormalised_over": round(weight_sum, 4)}
+            "missing_metrics": missing, "zero_scored_missing_metrics": zeroed,
+            "weights_renormalised_over": round(weight_sum, 4)}
+
+
+def business_zero_exclusions(metric_values, business_policy):
+    """The two approved exceptions to Business missing-as-zero (V5.4),
+    decided from the recorded missing reasons, never guessed:
+
+    - interest_coverage_ttm, when it is missing because the filer
+      reports no (or non-positive) interest expense — there is no
+      interest to cover, so the leg renormalises instead of scoring 0.
+      Coverage missing for any other reason (e.g. operating income
+      missing) still scores 0.
+    - net_cash_to_revenue and leverage_debt_to_revenue_ttm, when debt
+      could not be determined from the filings
+      (`debt_not_determinable_fail_closed`) — fail-closed stays
+      fail-closed: the legs renormalise and the failure stays flagged,
+      rather than converting an extraction failure into a 0.
+
+    Returns (excluded metric set, applied exception names)."""
+    business_policy = business_policy or {}
+    excluded, applied = set(), []
+    if business_policy.get("exception_interest_coverage_no_interest_expense", True) \
+            and metric_values.get("interest_coverage_missing_reason") == \
+            "interest_expense_ttm_missing_or_nonpositive":
+        excluded.add("interest_coverage_ttm")
+        applied.append("interest_coverage_no_interest_expense")
+    if business_policy.get("exception_debt_legs_when_debt_not_determinable", True) \
+            and metric_values.get("debt_not_determinable_fail_closed"):
+        excluded.update(("net_cash_to_revenue", "leverage_debt_to_revenue_ttm"))
+        applied.append("debt_legs_debt_not_determinable")
+    return excluded, applied
+
+
+def is_unprofitable(metric_values):
+    """Loss-maker test for the Value missing-policy: the negative-P/E
+    guard fired (trailing EPS <= 0), or the EPS actually used for the
+    trailing P/E is non-positive, or filed TTM / latest net income is
+    non-positive. Pure filed-data arithmetic — no estimates."""
+    if metric_values.get("negative_trailing_pe_not_scored"):
+        return True
+    eps = metric_values.get("eps_used_for_trailing_pe")
+    if eps is not None and eps <= 0:
+        return True
+    for key in ("net_income_ttm", "net_income_latest"):
+        ni = metric_values.get(key)
+        if ni is not None and ni <= 0:
+            return True
+    return False
+
+
+def value_zero_metrics(metric_values, policy_metrics):
+    """The Value legs eligible to score 0 under the optional V5.4
+    policy: the configured legs (trailing P/E, FCF yield) that are
+    actually missing, and only when the filer is not profitable.
+    A profitable filer whose leg is missing for a data reason keeps
+    the renormalise treatment — the zero is for unprofitability, not
+    for missing paperwork."""
+    if not policy_metrics or not is_unprofitable(metric_values):
+        return set()
+    return {m for m in policy_metrics if metric_values.get(m) is None}
 
 
 def apply_buyback_overvaluation_cap(value_result, dcf_upside_pct, cap=4.0, threshold_pct=-50.0):

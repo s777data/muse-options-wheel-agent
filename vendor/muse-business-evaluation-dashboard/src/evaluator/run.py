@@ -258,8 +258,25 @@ def evaluate(symbol, cfg):
     m["customer_concentration_score"] = conc_score
     m["revenue_percentile_vs_peers"] = percentiles.get("revenue")
     sc = cfg["scoring"]
-    business = scoring.score_section(sc["business"], m)
-    value = scoring.score_section(sc["value"], m)
+    # V5.4 missing-leg policy (config/scoring.yaml `missing_policy`):
+    # Business — no leg is optional: every missing sub-score scores 0
+    # at full weight, with the two approved exceptions (interest
+    # coverage with no interest expense; net-cash/leverage when debt
+    # is not determinable — both renormalise). Value — optional: trailing P/E and
+    # FCF yield score 0 when missing because the filer is unprofitable;
+    # DCF upside and buyback yield still renormalise. Moat unchanged.
+    policy = sc.get("missing_policy") or {}
+    business_policy = policy.get("business") or {}
+    business_zero_excl, business_policy_exceptions = \
+        scoring.business_zero_exclusions(m, business_policy)
+    business = scoring.score_section(
+        sc["business"], m,
+        missing_as_zero=bool(business_policy.get("missing_as_zero")),
+        zero_exclude_metrics=business_zero_excl)
+    value_policy = (policy.get("value") or {}).get("unprofitable_missing_as_zero") or {}
+    value_zero = scoring.value_zero_metrics(m, value_policy.get("metrics") or []) \
+        if value_policy.get("enabled") else set()
+    value = scoring.score_section(sc["value"], m, zero_metrics=value_zero)
     # V5.3 overvaluation cap on the buyback leg (needs the DCF upside,
     # which is why it applies after scoring, not inside the anchors).
     buyback_capped = scoring.apply_buyback_overvaluation_cap(value, upside)
@@ -356,6 +373,19 @@ def evaluate(symbol, cfg):
         "missing_business_metrics": business["missing_metrics"],
         "missing_value_metrics": value["missing_metrics"],
         "missing_moat_metrics": moat["missing_metrics"],
+        # V5.4: missing legs that were scored 0 at full weight under
+        # config/scoring.yaml missing_policy (still listed as missing
+        # above — the zero is a policy score, not filed data).
+        "zero_scored_missing_business_metrics": business.get("zero_scored_missing_metrics") or [],
+        "zero_scored_missing_value_metrics": value.get("zero_scored_missing_metrics") or [],
+        "missing_policy_business_exceptions_applied": business_policy_exceptions,
+        "missing_policy": "business: no leg optional, missing scores 0, except "
+                            "interest coverage missing for no interest expense and "
+                            "net-cash/leverage missing for undeterminable debt, which "
+                            "renormalise; value: trailing_pe/fcf_yield score 0 only "
+                            "when missing because unprofitable (optional, "
+                            "config-enabled), dcf_upside/forward_buyback_yield "
+                            "renormalise; moat renormalises",
         "peak_cycle_warning": bool(m.get("gross_margin_latest_pct") and m.get("gross_margin_median_5y_pct")
                                    and m["gross_margin_latest_pct"] - m["gross_margin_median_5y_pct"] > 20),
         "switching_costs": "not_evaluated_v1",

@@ -3,7 +3,7 @@
 REPLACES the source repo's valuation_scorer.py, which shelled out to the
 placeholder ``company_valuation_score`` CLI. That engine's code is NOT
 copied here (per BIG SANDY's instruction). Instead this adapter calls the
-Muse Business Evaluation Dashboard engine (V5.3 + GAV-Code, vendored
+Muse Business Evaluation Dashboard engine (V5.4 + GAV-Code, vendored
 unmodified under vendor/muse-business-evaluation-dashboard/, source repo
 s777data/muse-business-evaluation-dashboard @ ac8deaf) IN-PROCESS:
 
