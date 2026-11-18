@@ -31,6 +31,17 @@ per PRD §11 gaps 1/3/10 this scaffold's structure governs —
     they manage existing positions, not new exposure. The threshold is
     a config value (env WHEEL_MIN_CSP_BUYING_POWER_USD, default 700),
     never hard-coded at the call site.
+  - D-35 (2026-11-17, BIG SANDY's design): the 03_07 CSP screening
+    phase runs the MOMENTUM screen first
+    (scripts/csp_screening_momentum.py, a copy of csp_screening.py
+    whose Phase 4 gate requires the MACD cross-up momentum pattern).
+    Only when the momentum run returns 0 recommendations does the
+    regular screen (scripts/csp_screening.py) run, as the fallback.
+    The winning result is tagged "screen_mode": "momentum" or
+    "regular_fallback" (the latter also carries a
+    "momentum_result_summary"). A momentum-run exception propagates
+    as a phase failure — fail-closed, never a silent fallback. The
+    D-20 buying-power gate still skips BOTH screens.
 """
 from __future__ import annotations
 
@@ -40,6 +51,8 @@ import os
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+from scripts import csp_screening, csp_screening_momentum  # D-35 (module-level so tests can monkeypatch)
 
 WORKFLOW_VERSION = "1.0.0"
 # D-20: minimum effective buying power (USD) for the CSP screening
@@ -90,6 +103,34 @@ def _schedule_window(now: datetime) -> str:
     return now.strftime("%Y-%m-%d")
 
 
+def run_csp_screening_momentum_first() -> dict:
+    """D-35 wrapper for the 03_07 phase: momentum screen first, regular
+    screen as fallback on 0 momentum recommendations.
+
+    The momentum result is returned (tagged screen_mode="momentum")
+    when its "recommendations" list is non-empty. Otherwise the
+    regular screen runs and its result is returned tagged
+    screen_mode="regular_fallback" with a momentum_result_summary.
+    If the momentum run raises, the exception propagates — the phase
+    fails closed and the regular screen does NOT run.
+    """
+    momentum_result = csp_screening_momentum.run_csp_screening()
+    if isinstance(momentum_result, dict) and momentum_result.get("recommendations"):
+        tagged = dict(momentum_result)
+        tagged["screen_mode"] = "momentum"
+        return tagged
+    momentum_summary = {
+        "recommendations_count": 0,
+        "passing": momentum_result.get("passing") if isinstance(momentum_result, dict) else None,
+        "error": momentum_result.get("error") if isinstance(momentum_result, dict) else None,
+    }
+    regular_result = csp_screening.run_csp_screening()
+    tagged = dict(regular_result) if isinstance(regular_result, dict) else {"result": regular_result}
+    tagged["screen_mode"] = "regular_fallback"
+    tagged["momentum_result_summary"] = momentum_summary
+    return tagged
+
+
 def run_full_wheel(force_rerun: bool = False) -> dict:
     """Run the wheel in PRD order. Terminates at AWAITING_USER_ACTION on
     success; FAILED (with the phase and reason) on any required-phase
@@ -134,8 +175,9 @@ def run_full_wheel(force_rerun: bool = False) -> dict:
         phases.append(("01_account_snapshot", csp_screening.run_account_preflight))
         # Phase 2 position management BEFORE new exposure (PRD order)
         phases.append(("02_profit_taking", profit_taking.run_profit_taking_check))
-        # Phases 3-7 CSP eligibility + screening
-        phases.append(("03_07_csp_screening", csp_screening.run_csp_screening))
+        # Phases 3-7 CSP eligibility + screening (D-35: momentum first,
+        # regular screen as fallback on 0 momentum recommendations)
+        phases.append(("03_07_csp_screening", run_csp_screening_momentum_first))
         # Phase 8 covered calls
         phases.append(("08_covered_calls", covered_calls.run_covered_call_evaluation))
         account_artifact: dict = {}

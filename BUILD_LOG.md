@@ -522,3 +522,13 @@
 ## Session 24 — 2026-11-11 (D-34: collateral counts every opening — tree made clean)
 - At BIG SANDY's word, the working-tree collateral change found during the D-33 push is committed on its own: `collateral = strike x 100 x total_opened` (was peak `max_short`), RCLD fixture + `test_collateral_counts_every_opening` included. Verified the remote-vs-local diff was exactly this change and nothing else before pushing.
 - Suites: daily report 7/7. After this push the working tree and remote agree on the daily-report files.
+
+## Session 25 — 2026-11-17 (D-35: momentum-first screen)
+- BIG SANDY's design: momentum screen as a copy of csp_screening.py, pipeline runs momentum first end-to-end, regular screen only on 0 momentum recommendations.
+- Built `scripts/csp_screening_momentum.py` (scanner RSI cap 70 in the copy only, artifacts under OUTPUT_DIR/momentum, Phase 4 MACD cross-up gate from daily historicals — see DEVIATIONS D-35 for the exact gate) and the `run_csp_screening_momentum_first()` wrapper in `scripts/full_wheel.py` (screen_mode tagging, fail-closed on momentum exceptions, D-20 still skips both).
+- Tests: new `tests/test_momentum_screening.py` 8/8; existing suites green (D-27, D-17, daily report, fill dispatch, lifecycle). Live read-only smoke on MU: momentum_met False (MACD -57.16 / signal -54.33, RSI 38.0, cross 12 sessions ago).
+- Local only, unpushed; no live end-to-end run yet (BIG SANDY triggers after review).
+
+## Session 26 — 2026-11-17 (D-36 Phase 6 Final-score gate)
+- BIG SANDY directive after reviewing the revenue-95 valuation (Top 10 all ≥ 62.6; momentum passer TNGX only 20.5): add a qualification gate at Final 60.
+- Implemented `PHASE6_MIN_FINAL_SCORE = 60.0` + cohort helpers in both screening files; Phase 6 artifacts record the gate and exclusions. Tests 11/11 (3 new), all existing suites green; verified against the dry run's real Phase 5 rows and the revenue-95 rows. Local only, unpushed.

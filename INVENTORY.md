@@ -50,8 +50,9 @@ SOUL.md, config.yaml, .gitignore) and unrelated skill folders
 
 | Source path | Key functions (per PRD) | Target phase |
 |---|---|---|
-| `scripts/full_wheel.py` | `run_full_wheel()`, `send_telegram()` | 0, 7, 11 |
+| `scripts/full_wheel.py` | `run_full_wheel()`, `send_telegram()`, `run_csp_screening_momentum_first()` (D-35) | 0, 7, 11 |
 | `scripts/csp_screening.py` | `run_account_preflight()`, `parse_mcp_payload()`, `finite_nonnegative_number()`, `is_eligible_csp_account()`, `calculate_cash_secured_capacity()`, `run_single_scan()`, `make_filters()`, `run_partition()`, `fetch_fundamentals()`, `_yf_revenue_frame()`, `_yf_revenue_series()`, `_yf_country()`, `compute_yf_annual_yoy()`, `compute_yf_quarterly_qoq()`, `yfinance_annual_yoy_gate()`, `get_company_facts()`, `compute_annual_yoy()`, `compute_quarterly_qoq()`, `fetch_technicals()`, `_latest_indicator()`, `build_technical_conditions()`, `evaluate_post_screen()`, `select_phase5_tickers()`, `prepare_valuation_mcp_adapter()`, `build_phase5_valuation_rows()`, `qualify_options_hardened()`, `_qualify_options_window_hardened()`, `_fetch_option_instruments_complete()`, `_fetch_option_quotes_reconciled()`, `_fetch_underlying_quotes_reconciled()`, `_parse_utc_timestamp()`, `_quote_age_seconds()`, `build_phase7_ranking()`, `build_recommendation_telegram_message()`, `persist_phase_json()`, `run_csp_screening()`, transport: `call_robinhood_tool()` / `_robinhood_tool()` | 1, 3, 4, 5 (adapter prep/rows), 6, 7 |
+| `scripts/csp_screening_momentum.py` | `run_csp_screening()`, `fetch_momentum()`, `compute_momentum()`, `evaluate_post_screen()` | 1, 3, 4, 5, 6, 7 — **NEW in this repo (D-35): momentum-first copy of `csp_screening.py`; not a source copy** |
 | `scripts/profit_taking.py` | `run_profit_taking_check()`, `profit_taking_signal()`, `linear_boundary()` | 2 |
 | `scripts/covered_calls.py` | `run_covered_call_evaluation()` | 8 |
 | `scripts/valuation_scorer.py` | `run_sequential_valuation()`, `run_one_ticker()`, `_cli_command()`, `_extract_cli_json()` | 5 — **REPLACED by dashboard adapter (this repo); signatures preserved** |

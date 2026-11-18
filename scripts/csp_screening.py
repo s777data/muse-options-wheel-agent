@@ -122,6 +122,36 @@ MIN_OPTION_OPEN_INTEREST = 100
 MIN_OPTION_DAILY_VOLUME = 1
 MAX_CSP_CANDIDATES = 5
 MAX_PHASE5_VALUATION_CANDIDATES = 5
+
+# D-36 (2026-11-17, BIG SANDY): Phase 6 qualification gate — a ticker whose
+# Phase 5 Final-Code score is below this floor never reaches option-chain
+# qualification, no matter how strong its technicals or chart are.
+PHASE6_MIN_FINAL_SCORE = 60.0
+
+
+def select_phase6_cohort_tickers(valuation_rows: List[dict]) -> List[str]:
+    """D-36: deterministic Phase 6 cohort selection from Phase 5 rows.
+
+    Keeps the Phase 5 order (Final score desc), drops unscored rows and any
+    row scoring below PHASE6_MIN_FINAL_SCORE, and caps the cohort at
+    2 * MAX_PHASE5_VALUATION_CANDIDATES (primary + secondary).
+    """
+    return [
+        row["ticker"]
+        for row in valuation_rows
+        if row.get("score") is not None
+        and row["score"] >= PHASE6_MIN_FINAL_SCORE
+    ][: 2 * MAX_PHASE5_VALUATION_CANDIDATES]
+
+
+def phase6_excluded_below_gate(valuation_rows: List[dict]) -> List[str]:
+    """Tickers scored by Phase 5 but excluded from Phase 6 by the D-36 gate."""
+    return [
+        row["ticker"]
+        for row in valuation_rows
+        if row.get("score") is not None
+        and row["score"] < PHASE6_MIN_FINAL_SCORE
+    ]
 VALUATION_TICKER_TIMEOUT_SECONDS = 300
 MAX_CONTRACTS_PER_TICKER_IN_CSP_RANKING = 1
 FINAL_RANK_RUNNER_UP_COUNT = 1
@@ -2364,9 +2394,7 @@ def run_csp_screening() -> dict:
     # 6. Option-chain qualification
     # Phase 5 remains complete and untruncated. Phase 6 creates two ordered
     # five-ticker cohorts from Phase 5's deterministic composite-score order.
-    phase6_ranked_tickers = [
-        row["ticker"] for row in valuation_rows if row["score"] is not None
-    ][:2 * MAX_PHASE5_VALUATION_CANDIDATES]
+    phase6_ranked_tickers = select_phase6_cohort_tickers(valuation_rows)
     phase6_primary_tickers = phase6_ranked_tickers[:MAX_PHASE5_VALUATION_CANDIDATES]
     phase6_secondary_tickers = phase6_ranked_tickers[MAX_PHASE5_VALUATION_CANDIDATES:]
     if not phase6_primary_tickers:
@@ -2386,6 +2414,8 @@ def run_csp_screening() -> dict:
         "input_rows": valuation_rows,
         "input_count": len(phase6_ranked_tickers),
         "source_phase5_ordering": ["score_desc", "ticker_asc", "unscored_last"],
+        "min_final_score_gate": PHASE6_MIN_FINAL_SCORE,
+        "excluded_below_final_gate": phase6_excluded_below_gate(valuation_rows),
         "account": {
             "selected_account": phase1_payload["selected_account"],
             "unleveraged_buying_power_usd": account_context["buying_power"],
