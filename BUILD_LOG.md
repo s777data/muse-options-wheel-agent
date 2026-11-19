@@ -532,3 +532,9 @@
 ## Session 26 — 2026-11-17 (D-36 Phase 6 Final-score gate)
 - BIG SANDY directive after reviewing the revenue-95 valuation (Top 10 all ≥ 62.6; momentum passer TNGX only 20.5): add a qualification gate at Final 60.
 - Implemented `PHASE6_MIN_FINAL_SCORE = 60.0` + cohort helpers in both screening files; Phase 6 artifacts record the gate and exclusions. Tests 11/11 (3 new), all existing suites green; verified against the dry run's real Phase 5 rows and the revenue-95 rows. Local only, unpushed.
+
+## Session 27 — 2026-11-18 (D-37: Phase 6 future-quote fix)
+- BIG SANDY approved the fix plan in chat (presented after the day's re-run failed at Phase 6 on a future-dated quote; he had already called the run "working as expected", so this shipped as an approved change, not a repair of the momentum gate — the Top-100 S&P 500 gate test the same day passed AVGO/AMD and reproduced his NVDA/MU chart reads).
+- Implemented in both screening files: `QUOTE_FUTURE_TOLERANCE_SECONDS = 60` clamp in `_quote_age_seconds`, `FutureQuoteError`, per-ticker underlying exclusion with artifact record (`excluded_future_quote` in window summary, aggregated/deduped in `qualify_options_hardened`, top-level in the Phase 6 payload), `EXCLUDED_FUTURE_QUOTE` outcome status, and per-contract `FUTURE_QUOTE` rejection for future-dated chain quotes with updated_at recorded. Stale-quote behavior unchanged everywhere.
+- Tests: new `tests/test_phase6_future_quote.py` 6/6 against both modules; momentum 11/11, D-27, D-17, daily report, fill dispatch all green.
+- Local only, unpushed. Live verification pending market hours (Phase-6-only check on HRMY/INOD/LGN/NRIX/AVAH or the next full run — his call).

@@ -157,6 +157,7 @@ MAX_CONTRACTS_PER_TICKER_IN_CSP_RANKING = 1
 FINAL_RANK_RUNNER_UP_COUNT = 1
 STANDARD_OPTION_CONTRACT_SHARES = 100
 QUOTE_MAX_AGE_SECONDS = 1200
+QUOTE_FUTURE_TOLERANCE_SECONDS = 60
 DAYS_PER_YEAR = 365
 
 
@@ -1479,10 +1480,24 @@ def _parse_utc_timestamp(value: Any, field: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
+class FutureQuoteError(ValueError):
+    """A quote timestamp is ahead of the run clock beyond the skew tolerance."""
+
+    def __init__(self, age_seconds: float):
+        self.age_seconds = age_seconds
+        super().__init__(
+            "quote timestamp is in the future "
+            f"(by {-age_seconds:.1f}s, beyond the "
+            f"{QUOTE_FUTURE_TOLERANCE_SECONDS}s clock-skew tolerance)"
+        )
+
+
 def _quote_age_seconds(updated_at: Any, now_utc: datetime) -> float:
     age = (now_utc - _parse_utc_timestamp(updated_at, "updated_at")).total_seconds()
     if age < 0:
-        raise ValueError("quote timestamp is in the future")
+        if age >= -QUOTE_FUTURE_TOLERANCE_SECONDS:
+            return 0.0
+        raise FutureQuoteError(age)
     return age
 
 
@@ -1571,7 +1586,9 @@ def _fetch_option_quotes_reconciled(option_ids: List[str]) -> Tuple[Dict[str, di
     }
 
 
-def _fetch_underlying_quotes_reconciled(tickers: List[str], now_utc: datetime) -> Dict[str, dict]:
+def _fetch_underlying_quotes_reconciled(
+    tickers: List[str], now_utc: datetime
+) -> Tuple[Dict[str, dict], List[dict]]:
     data = parse_mcp_payload(
         mcp__robinhood_trading__get_equity_quotes(symbols=tickers),
         "get_equity_quotes",
@@ -1580,19 +1597,39 @@ def _fetch_underlying_quotes_reconciled(tickers: List[str], now_utc: datetime) -
     if not isinstance(results, list):
         raise RuntimeError("get_equity_quotes returned no results list")
     reconciled: Dict[str, dict] = {}
+    excluded_future: List[dict] = []
+    excluded_symbols = set()
     for item in results:
         quote = item.get("quote") if isinstance(item, dict) else None
         symbol = str(quote.get("symbol", "")).upper() if isinstance(quote, dict) else ""
         if symbol not in tickers:
             raise RuntimeError(f"unexpected underlying quote for {symbol or 'UNKNOWN'}")
-        if symbol in reconciled:
+        if symbol in reconciled or symbol in excluded_symbols:
             raise RuntimeError(f"duplicate underlying quote for {symbol}")
         price = _finite_number(quote.get("last_trade_price"), "last_trade_price")
         if price <= 0:
             raise RuntimeError(f"non-positive underlying price for {symbol}")
-        quote_age = _quote_age_seconds(
-            quote.get("venue_last_trade_time"), datetime.now(timezone.utc)
-        )
+        try:
+            quote_age = _quote_age_seconds(
+                quote.get("venue_last_trade_time"), datetime.now(timezone.utc)
+            )
+        except FutureQuoteError as exc:
+            run_clock = datetime.now(timezone.utc)
+            record = {
+                "ticker": symbol,
+                "updated_at": quote.get("venue_last_trade_time"),
+                "run_clock": run_clock.isoformat(),
+                "quote_age_seconds": round(exc.age_seconds, 3),
+            }
+            excluded_future.append(record)
+            excluded_symbols.add(symbol)
+            print(
+                f"  Excluding {symbol}: underlying quote timestamp in the future "
+                f"(updated_at={record['updated_at']}, run_clock={record['run_clock']}, "
+                f"age={exc.age_seconds:.1f}s) — ticker skipped, quote never trusted",
+                flush=True,
+            )
+            continue
         if quote_age > QUOTE_MAX_AGE_SECONDS:
             raise RuntimeError(f"stale underlying quote for {symbol}: {quote_age:.1f}s")
         reconciled[symbol] = {
@@ -1600,10 +1637,10 @@ def _fetch_underlying_quotes_reconciled(tickers: List[str], now_utc: datetime) -
             "quoted_at": quote.get("venue_last_trade_time"),
             "quote_age_seconds": round(quote_age, 3),
         }
-    missing = sorted(set(tickers).difference(reconciled))
+    missing = sorted(set(tickers).difference(reconciled).difference(excluded_symbols))
     if missing:
         raise RuntimeError("missing underlying quotes: " + ", ".join(missing))
-    return reconciled
+    return reconciled, excluded_future
 
 
 def _expiration_distance_from_strict_window(dte: int) -> int:
@@ -1630,11 +1667,42 @@ def _qualify_options_window_hardened(
         raise RuntimeError("Phase 6 input tickers must be unique and non-empty")
     now_utc = datetime.now(timezone.utc)
     today_la = now_utc.astimezone(ZoneInfo("America/Los_Angeles")).date()
-    underlying_quotes = _fetch_underlying_quotes_reconciled(normalized, now_utc)
+    underlying_quotes, future_quote_exclusions = _fetch_underlying_quotes_reconciled(
+        normalized, now_utc
+    )
+    future_excluded_by_ticker = {
+        record["ticker"]: record for record in future_quote_exclusions
+    }
     outcomes: Dict[str, dict] = {}
     strict_candidates: List[dict] = []
 
     for ticker in normalized:
+        if ticker in future_excluded_by_ticker:
+            exclusion = future_excluded_by_ticker[ticker]
+            outcomes[ticker] = {
+                "ticker": ticker,
+                "status": "EXCLUDED_FUTURE_QUOTE",
+                "current_price": None,
+                "underlying_quote": None,
+                "dte_window": {"min": min_dte, "max": max_dte},
+                "expiration_mode": None,
+                "selected_expirations": [],
+                "chain_count": 0,
+                "raw_instrument_count": 0,
+                "instrument_count": 0,
+                "quote_count": 0,
+                "contracts": [],
+                "reconciliation": {},
+                "future_quote_exclusion": exclusion,
+                "error": (
+                    "underlying quote timestamp in the future "
+                    f"(updated_at={exclusion['updated_at']}, "
+                    f"run_clock={exclusion['run_clock']}, "
+                    f"age={exclusion['quote_age_seconds']}s); ticker excluded, "
+                    "quote never trusted"
+                ),
+            }
+            continue
         outcome = {
             "ticker": ticker,
             "status": None,
@@ -1840,6 +1908,28 @@ def _qualify_options_window_hardened(
                     outcome["contracts"].append(contract)
                     if qualified:
                         strict_candidates.append(contract)
+                except FutureQuoteError as exc:
+                    print(
+                        f"  {ticker} option {option_id}: quote timestamp in the future "
+                        f"(updated_at={quote.get('updated_at')}, "
+                        f"age={exc.age_seconds:.1f}s) — contract excluded, "
+                        "quote never trusted",
+                        flush=True,
+                    )
+                    outcome["contracts"].append({
+                        "ticker": ticker,
+                        "option_id": option_id,
+                        "expiration": instrument.get("expiration_date"),
+                        "dte": instrument["dte"],
+                        "qualifies": False,
+                        "qualifies_strict": False,
+                        "qualifies_fallback": False,
+                        "passes_contract_gates": False,
+                        "rejection_reasons": ["FUTURE_QUOTE"],
+                        "quote_updated_at": quote.get("updated_at"),
+                        "quote_age_seconds": round(exc.age_seconds, 3),
+                        "quote_error": str(exc),
+                    })
                 except (TypeError, ValueError) as exc:
                     outcome["contracts"].append({
                         "ticker": ticker,
@@ -1889,6 +1979,7 @@ def _qualify_options_window_hardened(
         "input_count": len(normalized),
         "outcome_count": len(outcomes),
         "status_counts": status_counts,
+        "excluded_future_quote": future_quote_exclusions,
         "qualification_mode": qualification_mode,
         "qualified_ticker_count": len(ranked),
         "qualified_contract_count": sum(
@@ -1913,6 +2004,7 @@ def _qualify_options_window_hardened(
             "min_open_interest": MIN_OPTION_OPEN_INTEREST,
             "min_daily_volume": MIN_OPTION_DAILY_VOLUME,
             "max_quote_age_seconds": QUOTE_MAX_AGE_SECONDS,
+            "future_quote_tolerance_seconds": QUOTE_FUTURE_TOLERANCE_SECONDS,
             "min_net_roc": MIN_CSP_NET_ROC,
             "contract_multiplier": STANDARD_OPTION_CONTRACT_SHARES,
         },
@@ -2018,6 +2110,15 @@ def qualify_options_hardened(
             attempt["qualification_mode"] == "fallback" for attempt in attempts
         ),
     })
+    all_future_exclusions: List[dict] = []
+    seen_future_exclusions = set()
+    for attempt in attempts:
+        for record in attempt["summary"].get("excluded_future_quote", []):
+            key = (record.get("ticker"), record.get("updated_at"))
+            if key not in seen_future_exclusions:
+                seen_future_exclusions.add(key)
+                all_future_exclusions.append(record)
+    summary["excluded_future_quote"] = all_future_exclusions
     if summary["fallback_used"]:
         summary["fallback_trigger"] = (
             "NO STRICT 30-45 DTE QUALIFYING CONTRACTS ACROSS TOP 1-10"
@@ -2416,6 +2517,7 @@ def run_csp_screening() -> dict:
         "source_phase5_ordering": ["score_desc", "ticker_asc", "unscored_last"],
         "min_final_score_gate": PHASE6_MIN_FINAL_SCORE,
         "excluded_below_final_gate": phase6_excluded_below_gate(valuation_rows),
+        "excluded_future_quote": phase6_summary.get("excluded_future_quote", []),
         "account": {
             "selected_account": phase1_payload["selected_account"],
             "unleveraged_buying_power_usd": account_context["buying_power"],
